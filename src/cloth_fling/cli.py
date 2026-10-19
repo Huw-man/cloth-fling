@@ -96,6 +96,15 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose = sub.add_parser("diagnose", help="Compare primitives on one restored fixture")
     diagnose.add_argument("--output", type=Path, required=True)
     diagnose.add_argument("--seed", type=int, default=0)
+    diagnose.add_argument("--reset-kind", choices=("flat", "drop", "fold"), default="fold")
+    diagnose.add_argument("--reset-dir", type=Path, help="Compare from a saved fixture")
+    diagnose.add_argument(
+        "--grasp-pixels",
+        type=float,
+        nargs=4,
+        metavar=("U0", "V0", "U1", "V1"),
+        help="Use a manually reviewed favorable grasp pair for both primitives",
+    )
 
     collect = sub.add_parser("collect", help="Collect bounded evolving-cloth episodes")
     collect.add_argument("--output", type=Path, required=True)
@@ -173,9 +182,18 @@ def main(argv: list[str] | None = None) -> int:
                     reset_kind=args.reset_kind,
                 )
             elif args.command == "diagnose":
+                from cloth_fling.contracts import GraspAction
                 from cloth_fling.diagnostics import run_diagnostic
 
-                report = run_diagnostic(env, seed=args.seed, output_dir=args.output)
+                if args.reset_dir:
+                    env.restore(load_reset(args.reset_dir))
+                else:
+                    env.reset(args.seed, kind=args.reset_kind)
+                action = None
+                if args.grasp_pixels:
+                    u0, v0, u1, v1 = args.grasp_pixels
+                    action = GraspAction(((u0, v0), (u1, v1)), policy="manual_favorable")
+                report = run_diagnostic(env, seed=args.seed, output_dir=args.output, action=action)
             else:
                 import numpy as np
                 from PIL import Image

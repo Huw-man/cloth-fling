@@ -5,6 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+import pytest
+
 
 def test_offline_import_and_doctor_do_not_import_simulator():
     code = """
@@ -30,3 +33,22 @@ def test_example_configuration_is_portable():
     config = load_config(str(Path(__file__).parents[1] / "configs" / "cloth50.json"))
     assert config.cloth_size_m == 0.5
     assert config.sim_dt == 0.002
+
+
+def test_reset_roundtrip_rejects_pickle_and_conflicting_keys(tmp_path):
+    from cloth_fling.cli import load_reset
+
+    (tmp_path / "state.json").write_text(json.dumps({"mesh_hash": "mesh", "schema_version": 1}))
+    positions = np.zeros((3, 3), dtype=np.float32)
+    np.savez_compressed(tmp_path / "state.npz", positions=positions)
+    state = load_reset(tmp_path)
+    np.testing.assert_array_equal(state["positions"], positions)
+    assert state["mesh_hash"] == "mesh"
+
+    np.savez_compressed(tmp_path / "state.npz", mesh_hash=np.array("other"))
+    with pytest.raises(ValueError, match="conflicting"):
+        load_reset(tmp_path)
+
+    np.savez_compressed(tmp_path / "state.npz", positions=np.array([{}], dtype=object))
+    with pytest.raises(ValueError, match="Object arrays"):
+        load_reset(tmp_path)
