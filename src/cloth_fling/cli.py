@@ -123,6 +123,9 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--reset-dir", type=Path, help="Compare from a saved fixture")
     diagnose.add_argument("--record-video", action="store_true", help="Native debug captures")
     diagnose.add_argument(
+        "--primitives", nargs="+", choices=("laydown", "fling"), default=("laydown", "fling")
+    )
+    diagnose.add_argument(
         "--grasp-pixels",
         type=float,
         nargs=4,
@@ -146,6 +149,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--policy", choices=("uniform_valid", "geometry_guided"), default="uniform_valid"
     )
     collect.add_argument("--primitive", choices=("laydown", "fling"), default="laydown")
+    collect.add_argument("--split")
+    collect.add_argument("--reset-group-id")
+    collect.add_argument("--cloth-id")
+    collect.add_argument("--episode-metadata", type=Path, help="Episode metadata JSON object")
+    collect.add_argument("--settled-coverage-threshold", type=float)
+
+    benchmark = sub.add_parser("benchmark", help="Bounded milestone-3 benchmark")
+    benchmark.add_argument("stage", choices=("prepare", "qualify", "pilot", "report"))
+    benchmark.add_argument("--output", type=Path, default=Path("runs/milestone3"))
+    benchmark.add_argument("--backend", choices=("gpu", "cpu"), default="gpu")
+    benchmark.add_argument(
+        "--revision-checks", action="store_true", help="Run the single frozen revision's checks"
+    )
+    benchmark.add_argument(
+        "--revision-config", type=Path, help="Measured targeted laydown revision configuration"
+    )
+    benchmark.add_argument("--revision-reason", help="Measured failure addressed by revision")
 
     for command in (doctor, resets, diagnose, collect):
         command.add_argument("--config", help="Scene JSON; default: native_coulomb_v2")
@@ -182,6 +202,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "benchmark":
+            from cloth_fling.benchmark_run import run_benchmark_stage
+
+            report = run_benchmark_stage(
+                args.stage,
+                args.output,
+                backend=args.backend,
+                revision_checks=args.revision_checks,
+                revision_config=args.revision_config,
+                revision_reason=args.revision_reason,
+            )
+            print(json.dumps(report, indent=2, allow_nan=False))
+            return 0 if report.get("stage_passed", report.get("complete", False)) else 1
         if args.command == "dataset":
             from cloth_fling.data import verify_dataset
 
@@ -293,6 +326,15 @@ def main(argv: list[str] | None = None) -> int:
                     primitive_config=primitive_config,
                     record_video=args.record_video,
                     appearance=load_appearance(args),
+                    split=args.split,
+                    reset_group_id=args.reset_group_id,
+                    cloth_id=args.cloth_id,
+                    episode_metadata=(
+                        json.loads(args.episode_metadata.read_text())
+                        if args.episode_metadata
+                        else None
+                    ),
+                    settled_coverage_threshold=args.settled_coverage_threshold,
                 )
             elif args.command == "diagnose":
                 from cloth_fling.contracts import GraspAction
@@ -314,6 +356,7 @@ def main(argv: list[str] | None = None) -> int:
                     primitive_config=primitive_config,
                     record_video=args.record_video,
                     appearance=load_appearance(args),
+                    primitives=tuple(args.primitives),
                 )
             else:
                 import numpy as np

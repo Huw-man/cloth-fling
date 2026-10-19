@@ -16,7 +16,35 @@ on fresh 1.4.4 fixtures. Migration checks do not qualify old motion primitives,
 diverse-bunch reset distributions or learned policy behavior. No training,
 publication, cloud or hardware work was part of this migration.
 
-## Active milestone 2
+## Active milestone 3
+
+The user authorized fresh Genesis 1.4.4 laydown qualification and a bounded paired
+pilot on one synthetic 0.50 m square cloth. Milestone 2 results remain historical.
+The complete stage/gate contract is in `docs/milestone3.md`.
+
+Three new Herdr worktrees own fixtures/manifest/reporting, primitive diagnostics,
+and collection metadata/verification/recordings. The coordinator owns interfaces,
+CLI, integration, exclusive RTX 5080 lease, and execution. Integrate reviewed
+commits into local main and remove merged worktrees after preserving evidence.
+
+Freeze fresh schema-2 folds 11/17/23 (development diagnostics only) and the first
+six qualifying drops from each seed pool 1000–1011 and 2000–2011 before tuning.
+Use only pre-action reset acceptance; retain every failure. Stop if either pool
+cannot supply six. No physics/material/numerical/appearance/mesh/workspace changes.
+
+Limits: 24 drop preparations, 26 laydown diagnostics (including at most one measured
+trajectory revision), six frozen fling diagnostics, four two-action continuity
+episodes, 120 pilot attempts, six hours total simulator-run wall. Each action
+retains 30 simulated/120 wall seconds and existing settling/strain/clearance bounds.
+Two valid consecutive-action episodes and laydown qualification precede pilot.
+Pilot is 12 frozen drops × two selectors × at most five actions, development first,
+held-out once, exact paired state, no resets within episodes. Preserve negative
+gains and failures. Stop dependent work for restoration/chain/artifact/contact or
+rendering regressions. Budget exhaustion is incomplete, never an extension.
+
+No training, publication, cloud, hardware or broader collection is authorized.
+
+## Historical milestone 2 scope
 
 The user approved implementation of visible debug grasps, independently configured
 matte desk appearance, native table-contact friction qualification, and whole-cloth
