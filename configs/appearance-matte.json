@@ -1,0 +1,9 @@
+{
+  "mode": "matte",
+  "color": [0.55, 0.55, 0.55],
+  "roughness": 0.8,
+  "metallic": 0.0,
+  "texture_amplitude": 0.012,
+  "texture_size": 128,
+  "texture_seed": 0
+}
