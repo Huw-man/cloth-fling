@@ -1,6 +1,6 @@
 {
   "lift_height_m": 0.30,
-  "release_height_m": 0.008,
+  "release_height_m": 0.020,
   "lift_seconds": 1.8,
   "tauten_seconds": 2.0,
   "laydown_seconds": 2.0,

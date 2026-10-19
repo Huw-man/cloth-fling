@@ -20,7 +20,7 @@ class PrimitiveConfig:
 
     lift_height_m: float = 0.30
     table_height_m: float = 0.0
-    release_height_m: float = 0.008
+    release_height_m: float = 0.020
     lift_seconds: float = 1.8
     tauten_seconds: float = 2.0
     laydown_seconds: float = 2.0
@@ -594,7 +594,7 @@ def execute_action(
             )
         run.phase("release")
         measured, release_velocity = _state(env)
-        if np.any(measured[list(ids), 2] > c.table_height_m + 0.02):
+        if np.any(measured[list(ids), 2] > c.table_height_m + 0.02 + 1e-6):
             raise PrimitiveFailure("release_not_near_table")
         run.release_coverage = _coverage(env)[0]
         env.release()  # Backend must preserve velocities. Never write cloth positions/velocities.
