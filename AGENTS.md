@@ -1,5 +1,17 @@
 # Cloth-fling first milestone
 
+## Current priority: Genesis 1.4.4 migration
+
+The user requested the latest stable simulator before further simulation work.
+PyPI and the official release page identify 1.4.4 (2026-10-11, upstream a649105).
+Pause cloth-motion diagnostics and collection. Preserve milestone 2 results as
+historical Genesis 0.4.3 evidence; migration checks must not inherit their pass status.
+Use separate Herdr worktrees for runtime/contact, rendering/replay, and dependency/
+release integration. Coordinator owns merges and GPU leases. No old-runtime GPU
+work, primitive tuning, collection, training, publication, cloud or hardware work.
+Bounded probes of the upgraded runtime are allowed only after dependencies are
+installed and the coordinator grants the relevant exclusive RTX 5080 lease.
+
 ## Active milestone 2
 
 The user approved implementation of visible debug grasps, independently configured
