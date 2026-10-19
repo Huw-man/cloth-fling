@@ -649,6 +649,26 @@ def test_local_strain_guard_brakes_moving_span_before_hard_ceiling(short_config)
     assert env.simulated_time < config.tauten_seconds  # transition after braking, no long hold
 
 
+def test_20mm_release_accepts_float32_readback_roundoff(short_config):
+    config = replace(short_config, release_height_m=0.02)
+    env = FakeClothBackend()
+    get_positions = env.get_positions
+
+    def quantized_positions():
+        p = get_positions()
+        ids = list(env.attached_ids)
+        if ids:
+            near = np.abs(p[ids, 2] - 0.02) < 1e-7
+            for particle in np.asarray(ids)[near]:
+                p[particle, 2] = float(np.nextafter(np.float32(0.02), np.float32(np.inf)))
+        return p
+
+    env.get_positions = quantized_positions
+    result = execute_action(env, action(env), config)
+    assert result.execution_valid, result.reason
+    assert env.release_calls == 1 and not env.attached_ids
+
+
 def test_positive_local_strain_rate_triggers_predictive_stop(short_config):
     config = replace(short_config, max_strain=0.1)
     env, run = _tauten_fixture(config)
