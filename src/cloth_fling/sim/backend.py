@@ -350,13 +350,13 @@ class GenesisBackend:
                 "force_render": True,
             }
             if not self._render_buffers_ready:
-                # Genesis 0.4.3 applies pending vertex updates BEFORE the first
+                # The native offscreen path applies pending updates BEFORE the first
                 # offscreen draw allocates GL buffers (IDs are still -1). That
                 # first draw uploads the original static visual mesh. Discard it
                 # and force a second upload of the CURRENT dynamic render fields.
                 self.camera.render(**render_options)
                 self._render_buffers_ready = True
-            # Restore/setters do not increment scene._t. Bypass both visualizer
+            # Restore/setters do not advance simulation. Bypass both visualizer
             # and rasterizer time caches; refreshing rendering must never step.
             rgb, _, _, _ = self.camera.render(**render_options)
             # Separate native depth-only draw samples pixel centres without RGB

@@ -102,9 +102,9 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
 
         def immutable_render(**options):
             state = backend.snapshot()
-            step = backend.scene._t
+            step = backend.scene.sim.cur_substep_global
             result = original_render(**options)
-            assert backend.scene._t == step
+            assert backend.scene.sim.cur_substep_global == step
             assert backend.snapshot()["state_hash"] == state["state_hash"]
             render_calls.append(options)
             return result
@@ -115,7 +115,7 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
         assert len(render_calls) == 3  # Warm, actual RGB, calibrated depth-only draw.
         report["fold_first_frame"] = nonflat_render_metrics(backend, folded)
         # Direct observation/restore cannot hide a refresh behind physics steps.
-        step = backend.scene._t
+        step = backend.scene.sim.cur_substep_global
         original_step = backend.scene.step
 
         def forbidden_step(*args, **kwargs):
@@ -132,7 +132,7 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
         shifted["state_hash"] = _state_hash(shifted)
         raised = backend.restore(shifted)
         report["same_step_raised_restore"] = nonflat_render_metrics(backend, raised)
-        assert backend.scene._t == step
+        assert backend.scene.sim.cur_substep_global == step
         assert backend.snapshot()["state_hash"] == shifted["state_hash"]
         assert np.mean(foreground(raised.rgb) != foreground(folded.rgb)) > 0.02
         restored = backend.restore(fold_state)
@@ -140,16 +140,16 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
         np.testing.assert_array_equal(restored.depth, folded.depth)
         assert restored.observation_id == folded.observation_id
         assert backend.snapshot()["state_hash"] == fold_state["state_hash"]
-        assert backend.scene._t == step
+        assert backend.scene.sim.cur_substep_global == step
         backend.scene.step = original_step
         flat = backend.reset(7, kind="flat")
         assert np.mean(foreground(flat.rgb) != foreground(folded.rgb)) > 0.05
         # Restore folded state after a flat render, at an unchanged scene step.
         backend.scene.step = forbidden_step
-        step = backend.scene._t
+        step = backend.scene.sim.cur_substep_global
         from_flat = backend.restore(fold_state)
         report["fold_restore_after_flat"] = nonflat_render_metrics(backend, from_flat)
-        assert backend.scene._t == step
+        assert backend.scene.sim.cur_substep_global == step
         assert backend.snapshot()["state_hash"] == fold_state["state_hash"]
         np.testing.assert_array_equal(from_flat.rgb, folded.rgb)
         np.testing.assert_array_equal(from_flat.depth, folded.depth)
