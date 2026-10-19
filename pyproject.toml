@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cloth-fling"
+version = "0.1.0"
+description = "Robotless cloth unfolding experiments with explicit assisted grasps"
+requires-python = ">=3.11,<3.13"
+dependencies = ["numpy>=1.26,<3", "pillow>=10,<13", "pyarrow>=18,<24"]
+
+[project.optional-dependencies]
+sim = ["genesis-world==0.4.3", "trimesh>=4.5,<5"]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+
+[project.scripts]
+cloth-fling = "cloth_fling.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cloth_fling"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["gpu: requires Genesis and an available CUDA GPU"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
