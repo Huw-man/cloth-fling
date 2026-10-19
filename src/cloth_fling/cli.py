@@ -90,7 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     resets = sub.add_parser("resets", help="Generate a bounded reset and save its state")
     resets.add_argument("--output", type=Path, required=True)
-    resets.add_argument("--kind", choices=("flat", "drop", "fold"), default="drop")
+    resets.add_argument("--kind", choices=("flat", "drop", "fold"), default="fold")
     resets.add_argument("--seed", type=int, default=0)
 
     diagnose = sub.add_parser("diagnose", help="Compare primitives on one restored fixture")
@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument(
         "--reset-dir", type=Path, help="Restore a saved reset at episode boundaries"
     )
-    collect.add_argument("--reset-kind", choices=("flat", "drop", "fold"), default="drop")
+    collect.add_argument("--reset-kind", choices=("flat", "drop", "fold"), default="fold")
     collect.add_argument(
         "--policy", choices=("uniform_valid", "geometry_guided"), default="uniform_valid"
     )

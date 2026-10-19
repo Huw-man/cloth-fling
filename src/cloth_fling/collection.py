@@ -15,6 +15,7 @@ from importlib.metadata import PackageNotFoundError, version
 import numpy as np
 
 from .data import DatasetWriter
+from .provenance import runtime_provenance
 
 
 class CollectionTimeout(TimeoutError):
@@ -163,6 +164,7 @@ def collect_episodes(
             "reset_kind": reset_kind,
             "uses_saved_reset": reset_source is not None,
             "runtime_package_versions": versions,
+            "runtime_provenance": runtime_provenance(),
         },
     ) as writer:
         report["run_id"] = writer.run_id

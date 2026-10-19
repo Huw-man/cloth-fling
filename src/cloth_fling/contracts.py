@@ -60,8 +60,8 @@ class SceneConfig:
             raise ValueError("minimum grasp separation must be below maximum")
         if isinstance(self.image_size, bool) or not isinstance(self.image_size, int):
             raise ValueError("image_size must be an integer")
-        if self.image_size < 32:
-            raise ValueError("image_size must be at least 32")
+        if self.image_size < 16:
+            raise ValueError("image_size must be at least 16")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int) or self.seed < 0:
             raise ValueError("seed must be a nonnegative integer")
 

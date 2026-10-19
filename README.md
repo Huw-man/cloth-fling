@@ -40,20 +40,23 @@ Begin with the fixed 50 x 50 cm synthetic cloth in `configs/cloth50.json`.
 
 ```bash
 uv run --locked --extra sim cloth-fling resets \
-  --config configs/cloth50.json --seed 7 --output runs/reset-7
+  --config configs/cloth50.json --kind fold --seed 11 --output runs/reset-11
 
 uv run --locked --extra sim cloth-fling diagnose \
-  --config configs/cloth50.json --seed 7 --output runs/diagnostic-7
+  --config configs/cloth50.json --reset-dir runs/reset-11 --output runs/diagnostic-11
 
 uv run --locked --extra sim cloth-fling collect \
-  --config configs/cloth50.json --seed 7 --episodes 1 --max-actions 3 \
-  --primitive laydown --output runs/episodes-7
+  --config configs/cloth50.json --reset-dir runs/reset-11 --episodes 1 --max-actions 3 \
+  --primitive laydown --output runs/episodes-11
 
-uv run --locked cloth-fling dataset verify runs/episodes-7
+uv run --locked cloth-fling dataset verify runs/episodes-11
 ```
 
 Use `--primitive fling` to inspect the dynamic candidate. Keep broad collection
 behind the primitive diagnostic gate in [the milestone](docs/milestone.md).
+CLI reset and collection defaults use `fold`. Random single-point `drop` preparation
+is available explicitly, but tested seeds failed table containment; its distribution
+is unqualified. Those failures are recorded, with no fallback to a different reset.
 The controlled baseline is lift, tauten, diagonal laydown, drag, then release.
 The fling candidate retains both grasps through swing, lowering and placement;
 it releases near the table. Both remain configurable independently of selection.
