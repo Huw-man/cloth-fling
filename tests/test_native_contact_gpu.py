@@ -160,7 +160,7 @@ def test_native_impulse_microtests(tmp_path):
             rigid.dyn_info.geoms,
             rigid.dyn_state.links,
             rigid.collider._sdf._sdf_info,
-            rigid._rigid_info,
+            rigid.rigid_info,
             rigid.collider.collider_config,
         )
         np.testing.assert_array_equal(out[:, 0], out[:, 2])
@@ -203,7 +203,7 @@ def test_native_impulse_microtests(tmp_path):
             rigid.dyn_info.geoms,
             rigid.dyn_state.links,
             rigid.collider._sdf._sdf_info,
-            rigid._rigid_info,
+            rigid.rigid_info,
             rigid.collider.collider_config,
         )
         np.testing.assert_array_equal(again, out)  # Logging cannot affect physics.

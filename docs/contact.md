@@ -10,10 +10,12 @@ remains explicit particle assistance, never a physical pinch-grasp claim.
 CPU compatibility tests cover the 1.4.4 source guards, archived-profile rejection,
 schema-2 exact restore, cross-engine rejection, render-only latching, attachment
 momentum and offline import isolation. **Genesis 1.4.4 GPU contact and rendering
-qualification are pending.** The 0.4.3 results below remain historical evidence
-and confer no pass status on v2. Bounded 1.4.4 probes require the coordinator's
-exclusive GPU lease and the shared upgraded environment; never use the old venv.
-Full backend probes also require the separate rendering port.
+qualification are separate:** fresh 1.4.4 native microtests and the three bounded
+contact coupon profiles passed on the RTX 5080 (see the evidence section below).
+This contact run does not qualify rendered RGB/depth, physical snapshot replay,
+primitives, resets or collection. The 0.4.3 results remain historical evidence
+and confer no pass status on v2. Further bounded 1.4.4 probes require a new
+coordinator lease and the shared upgraded environment; never use the old venv.
 
 ## Contact law and isolation
 
@@ -57,9 +59,9 @@ adds no normal damping to conceal it.
 
 | Configuration | Static table mu | Kinetic table mu | Status |
 | --- | ---: | ---: | --- |
-| `configs/contact-native-v2.json` | .40 | .30 | unqualified v2 engineering prior |
-| `configs/contact-low-v2.json` | .25 | .20 | unqualified v2 sensitivity prior |
-| `configs/contact-high-v2.json` | .60 | .45 | unqualified v2 sensitivity prior |
+| `configs/contact-native-v2.json` | .40 | .30 | bounded coupon gates passed; engineering prior |
+| `configs/contact-low-v2.json` | .25 | .20 | bounded coupon gates passed; sensitivity prior |
+| `configs/contact-high-v2.json` | .60 | .45 | bounded coupon gates passed; sensitivity prior |
 
 Use `SceneConfig(contact_profile="native_coulomb_v2", table_static_friction=.4,
 table_kinetic_friction=.3)`. Omitted native table coefficients resolve to .40/.30.
@@ -252,6 +254,68 @@ finish, moisture, pressure and pull conditions has been established here. The
 three coefficient pairs are engineering priors, never literature measurements or
 simulated calibration promoted to a real material match. This work qualifies no
 learned model, general reset distribution, physical grasp, or deployment.
+
+## Fresh Genesis 1.4.4 contact evidence, 2026-10-19
+
+Under the coordinator's exclusive RTX 5080 lease, the native impulse microtest
+passed and all three profiles passed all 15 existing coupon gates. This is fresh
+1.4.4 execution evidence, independent of the historical section below. Execution
+used integrated base `fa4bbac` plus the test-only accessor fix committed with this
+record: two stale `rigid._rigid_info` references became public `rigid.rigid_info`.
+The first microtest attempt failed at that accessor before impulse assertions;
+its log is retained. The second attempt passed. No contact-law, normal response,
+source guard, material, damping, trajectory, or acceptance threshold changed.
+
+The host was NVIDIA GeForce RTX 5080, 16303 MiB, driver 595.91.07. The separate
+shared environment supplied Python 3.12.13, Genesis 1.4.4, Quadrants 1.3.3,
+Torch 2.11.0+cu128, and Trimesh 4.12.2. Each host command used this worktree's
+`src` through `PYTHONPATH`. The historical root environment was not used.
+Native runtime identity recorded CUDA, ndarray mode, deterministic algorithms,
+32-bit precision, `.002` dt, four substeps and 64 stretch sweeps. The contact
+diagnostic used the unchanged .5 m cloth, 1 cm particle diameter, .3 kg/m² density,
+and .6 s main cases; airborne translation remained bounded to .1 s. The slide
+comparison used `.001` dt and four substeps. Profiles ran serially.
+
+| Table static/kinetic | Slide deceleration (m/s²) | Expected mu*g | Half-dt stopping-distance change |
+| --- | ---: | ---: | ---: |
+| .40/.30 | 2.945139 | 2.9430 | .28036% |
+| .25/.20 | 1.963931 | 1.9620 | 1.81838% |
+| .60/.45 | 4.410652 | 4.4145 | .26139% |
+
+Both unforced drop cases had zero measured positive normal-energy gain in all
+profiles. Their maximum sampled mean rebound height was 2.33e-9 m. All cases
+had zero recorded positive friction work. Airborne normal/tangential impulses
+and attached tangential impulses were exactly zero. The prescribed attached
+coupon retained a small native vertical numerical residual: mean height rose
+about 4.95e-6 m, with normal-energy gain about 4.86e-5 J/kg, below the unchanged
+.001 J/kg gate. These samples do not establish real material restitution or
+calibration. The native microtest separately verified normal position/velocity
+invariance, analytic static/kinetic/impact friction, reversed motion, excluded
+particles, logging-on/off equality, and preservation of cumulative counters
+through `scene.reset()` and explicit accounting-epoch resets.
+
+Ignored evidence is retained at
+`runs/contact-native-v2/gpu-qualification-20261019/`:
+
+- `native-attempt1/report.json`, `low-attempt1/report.json`, and
+  `high-attempt1/report.json`, with eight full-step/substep NPZ archives each.
+- `microtest-attempt2/test_native_impulse_microtests0/native-microtests.npz`
+  and the passing log; `microtest-attempt1.log` preserves the failed accessor attempt.
+- `execution-identity.json`, `executed-test-fix.patch`, `qualification-summary.json`,
+  `audit_evidence.py`, and `evidence-audit.log` record source/lock/artifact hashes,
+  runtime versions and an independent offline completeness audit.
+- `offline-tests.log`: integrated offline suite **322 passed, 3 GPU deselected**.
+  Ruff and `git diff --check` passed for the owned change.
+
+The offline audit verified finite state arrays and exact native accounting counts
+for all 24 case archives: 1200 substeps per .6 s case, 2400 for half-dt slides,
+and 200 for airborne controls. No captured substeps were truncated. The contact
+diagnostics constructed the integrated backend and its rendering adapter but did
+not render or assess camera images. No primitives, collection, training, cloud,
+hardware or publication ran. Runtime metadata does not self-certify arbitrary
+configurations; bounded qualification remains attached to these reports.
+The GPU compute-app list was empty at handoff and the runtime/contact lease was
+explicitly released before this CPU-only documentation work.
 
 ## Historical Genesis 0.4.3 evidence, 2026-10-19
 
