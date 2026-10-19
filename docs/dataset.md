@@ -258,15 +258,19 @@ retain legacy appearance with `None`.
 ```bash
 uv sync --locked --extra sim --extra video --extra dev
 uv run --locked --extra sim --extra video cloth-fling diagnose \
-  --config configs/cloth50.json --reset-dir runs/reset-11 \
-  --primitive-config configs/primitive-default.json --record-video \
+  --config configs/contact-native-v1.json --appearance-config configs/appearance-matte.json \
+  --reset-dir runs/m2-reset-11 --primitive-config configs/primitive-default.json --record-video \
   --output runs/diagnostic-clearance
 uv run --locked --extra sim --extra video cloth-fling collect \
-  --config configs/cloth50.json --reset-dir runs/reset-11 \
-  --episodes 1 --max-actions 2 --record-video --output runs/two-actions
+  --config configs/contact-native-v1.json --appearance-config configs/appearance-matte.json \
+  --reset-dir runs/m2-reset-11 --primitive-config configs/primitive-full-lift-laydown-v2.json \
+  --episodes 1 --max-actions 2 --primitive laydown --record-video --output runs/two-actions
 ```
 
-These commands are examples for bounded runs **after** the contact and primitive
+The saved `runs/m2-reset-11` fixture must be generated under this native contact profile,
+as in the [README quickstart](../README.md#milestone-2-quickstart); never restore a legacy
+physics snapshot directly into the new profile. These commands are examples for bounded
+runs **after** the contact and primitive
 acceptance gates in [milestone 2](milestone2.md) pass. CLI `diagnose` returns nonzero
 for invalid execution; `collect` returns nonzero for invalid actions or reset failures.
 Neither a zero exit status nor a valid dataset is behavior qualification.
@@ -341,3 +345,31 @@ profile, record the parent reset hash, settle once and validate that derived fix
 then restore it exactly within that profile for every comparison. Settling under the
 new profile does not establish identical initial states across profiles. This stage
 adds no cross-profile reset import command.
+
+
+## Experimental full-lift laydown profile
+
+`configs/primitive-full-lift-laydown-v2.json` is a complete `PrimitiveConfig` document
+for bounded experimental laydown checks. It matches the resolved
+`configs/primitive-default.json` settings except `laydown_distance_m=0.30` instead of
+0.12. Drag remains 0.06 m; swing, pullback and placement distances retain their reference
+values. The profile keeps all clearance, strain, speed, acceleration, settling and action
+guards unchanged. It does not configure physics or appearance. The dataclass/reference
+default remains 0.12 m, and `configs/primitive-legacy.json` remains explicit milestone 1
+reproduction with clearance disabled.
+
+The coordinator's interim native-contact checks with full clearance reported:
+
+| Fixed fixture | Final coverage | Interpretation |
+| --- | --- | --- |
+| Seed 11 fixture, reviewed pair | Approximately 0.99995 | Bounded laydown pass, low strain |
+| Frozen seed 17 fixture, reviewed pair | Approximately 0.9999 | Bounded laydown pass, low strain |
+| Seed 23 fixture, old grasp pair | Initial lift fails | No completed laydown pass |
+
+These observations cover two verified fixed cases. They do not establish a universally
+successful profile, a qualified grasp selector, a reset distribution, repeated-action
+success or broad-collection readiness. Dynamic fling remains unqualified. A freshly
+generated reset with the same seed and an automatically selected pair is not the frozen
+fixture/pair comparison. Retain failed attempts and use exact restoration within each
+physics profile. The coordinator owns the final receipts and qualification report;
+these interim observations do not establish that all milestone 2 gates have passed.
