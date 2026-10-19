@@ -1,5 +1,7 @@
 """Offline checks of the pinned rendering adapter's layout and isolation guards."""
 
+import json
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -158,6 +160,63 @@ def test_visual_copy_identity_supports_and_unchanged_physics(layout):
     )
 
 
+def test_metadata_distinguishes_installed_mechanisms_from_qualification(layout, monkeypatch):
+    scene, cloth, gs, _ = layout
+    adapter = PhysicsMeshRendering(scene, cloth, gs)
+    assert adapter.identity["engine_version"] == "1.4.4"
+    assert adapter.identity["native_renderer_classes"] is None
+    assert adapter.identity["visual_supports"] is None
+    assert not adapter.capabilities["identity_visual_supports_installed"]
+    scene.is_built = True
+    adapter.install_identity_supports()
+    assert adapter.identity["visual_supports"] == "identity"
+    assert adapter.capabilities["identity_visual_supports_installed"]
+
+    class Renderer:
+        def _get_primitive_program(self, primitive, flags, program_flags):
+            return "test_program"
+
+    Renderer.__module__ = "genesis.ext.pyrender.renderer"
+    target = Renderer()
+    camera = SimpleNamespace(
+        uid="test", _rasterizer=SimpleNamespace(_camera_targets={"test": target})
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "genesis.ext.pyrender",
+        SimpleNamespace(RenderFlags=SimpleNamespace(DEPTH_ONLY=1, SEG=2)),
+    )
+    # Native source dispatch is independently audited; exercise installation and
+    # metadata without importing Genesis or creating a graphics context.
+    monkeypatch.setattr(
+        "cloth_fling.sim.render_mesh.inspect.getsource",
+        lambda _: (
+            """
+not flags & RenderFlags.DEPTH_ONLY
+elif flags & RenderFlags.SEG:
+geometry_shader = "segmentation_double_sided.geom"
+vertex_shader = "mesh_depth.vert"
+"""
+        ),
+    )
+    adapter.install_two_sided_depth(camera)
+    assert adapter.identity["native_renderer_classes"] == ["genesis.ext.pyrender.renderer.Renderer"]
+    assert adapter.capabilities["double_sided_depth_camera_count"] == 1
+    for key, value in adapter.capabilities.items():
+        if key.endswith("_qualified") or key == "qualification_inherited":
+            assert value is False
+    assert adapter.capabilities["qualification_status"] == "unqualified"
+    json.dumps(
+        {"identity": adapter.identity, "capabilities": adapter.capabilities}, allow_nan=False
+    )
+    modified = adapter.identity
+    modified["native_renderer_classes"].clear()
+    assert adapter.identity["native_renderer_classes"]
+    modified = adapter.capabilities
+    modified["native_gpu_qualified"] = True
+    assert adapter.capabilities["native_gpu_qualified"] is False
+
+
 @pytest.mark.parametrize(
     "fault", ["version", "built", "multiple", "offset", "alias", "one_sided", "reordered"]
 )
@@ -198,6 +257,7 @@ def test_reject_unsupported_built_layout(layout, fault):
         scene.pbd_solver.vverts_info.support_idxs.value = np.zeros((4, 2))
     with pytest.raises(RuntimeError):
         adapter.install_identity_supports()
+    assert adapter.capabilities["identity_visual_supports_installed"] is False
 
 
 def test_depth_program_change_is_local_and_only_for_double_sided_depth():

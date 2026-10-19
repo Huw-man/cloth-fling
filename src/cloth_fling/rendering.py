@@ -231,6 +231,8 @@ def renderer_engine_identity(env):
         "runtime_generation": f"genesis-{version}" if version else "unknown",
         "renderer": "native-rasterizer",
         "backend_identity": getattr(env, "runtime_identity", None),
+        "rendering_identity": getattr(env, "rendering_identity", None),
+        "rendering_capabilities": getattr(env, "rendering_capabilities", None),
     }
 
 

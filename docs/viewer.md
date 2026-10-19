@@ -47,6 +47,22 @@ is retained as buffer-upload warmup pending native qualification; there is no
 same-step cache patch here, only native `force_render=True`. Public 1.4.4 setters
 and native rendering refresh are used without a physics step.
 
+`PhysicsMeshRendering.identity` and `.capabilities` are fresh JSON-safe
+dictionaries, forwarded by the runtime as `env.rendering_identity` and
+`env.rendering_capabilities`. Identity includes the actual engine version,
+adapter revision, exact-triangle topology, support/depth mechanisms and native
+renderer class names read from installed camera targets. Unknown class names
+and uninstalled mechanisms remain `None`. Installation flags/counts are updated
+only after layout/state/device readback checks succeed.
+
+These dictionaries describe configuration separately from qualification.
+`qualification_status="unqualified"`, all `*_qualified=false` flags and
+`qualification_inherited=false` remain explicit; successful installation never
+promotes native GPU, RGB/depth rays, same-step restore, folded backfaces, debug
+isolation or matte appearance to qualified. Those require separately recorded
+leased checks. Provenance and new video engine metadata include both dictionaries;
+absent backend metadata stays `None`.
+
 These tools produce privileged debug/evaluation artifacts. Policy input remains the
 original RGB observation. Debug markers, geometry, depth, overlays and clearance
 must never enter learned RGB input. Appearance applies to the **table only**;

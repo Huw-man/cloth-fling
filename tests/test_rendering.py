@@ -16,6 +16,7 @@ from cloth_fling.rendering import (
     marker_positions,
     preserved_camera,
     render_debug_views,
+    renderer_engine_identity,
 )
 from cloth_fling.sim.appearance import (
     AppearanceConfig,
@@ -115,6 +116,20 @@ def test_measured_markers_and_immediate_release_hiding():
     np.testing.assert_array_equal(marker_positions(env.p, (), "pre_attach", env.p[:2]), env.p[:2])
     with pytest.raises(ValueError):
         marker_positions(env.p, (-1, 0), "lift")
+
+
+def test_video_engine_identity_preserves_renderer_metadata_and_unknowns():
+    env = Env()
+    assert renderer_engine_identity(env)["rendering_identity"] is None
+    assert renderer_engine_identity(env)["rendering_capabilities"] is None
+    env.rendering_identity = {"backend": "native_rasterizer", "engine_version": "1.4.4"}
+    env.rendering_capabilities = {
+        "native_gpu_qualified": False,
+        "qualification_status": "unqualified",
+    }
+    identity = renderer_engine_identity(env)
+    assert identity["rendering_identity"] == env.rendering_identity
+    assert identity["rendering_capabilities"] == env.rendering_capabilities
 
 
 def test_batched_native_pose_fields_and_debug_flag_restore_even_when_set_pose_fails():

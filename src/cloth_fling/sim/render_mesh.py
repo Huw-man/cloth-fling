@@ -92,6 +92,53 @@ class PhysicsMeshRendering:
         cloth._vverts = np.asarray(visual.verts, dtype=genesis.np_float).copy()
         cloth._vfaces = np.asarray(visual.faces, dtype=genesis.np_int).copy()
         self._assert_physics_topology_unchanged()
+        self._engine_version = genesis.__version__
+        self._identity_supports_installed = False
+        self._depth_renderers = {}
+
+    @property
+    def identity(self):
+        """JSON-safe render identity; native class names come from installed targets.
+
+        Installation/readback describe adapter configuration, never image quality
+        or GPU qualification. Return fresh metadata so callers cannot alter it.
+        """
+        return {
+            "schema_version": 1,
+            "engine": "genesis",
+            "engine_version": self._engine_version,
+            "runtime_generation": f"genesis-{self._engine_version}",
+            "backend": "native_rasterizer",
+            "adapter": "cloth_fling.sim.render_mesh.PhysicsMeshRendering",
+            "adapter_revision": "genesis144_exact_triangles_v1",
+            "native_renderer_classes": sorted(set(self._depth_renderers.values())) or None,
+            "visual_topology": "detached_exact_physics_triangles",
+            "visual_supports": "identity" if self._identity_supports_installed else None,
+            "double_sided_depth": (
+                "camera_local_native_segmentation_program" if self._depth_renderers else None
+            ),
+            "depth_convention": "positive_camera_z_metres",
+            "pixel_center_offset": 0.5,
+        }
+
+    @property
+    def capabilities(self):
+        """Installed render mechanisms and explicit outstanding qualification."""
+        return {
+            "single_unbatched_pbd_cloth_only": True,
+            "exact_physics_triangle_topology_installed": True,
+            "identity_visual_supports_installed": self._identity_supports_installed,
+            "double_sided_depth_camera_count": len(self._depth_renderers),
+            "render_refresh": "native_force_render_without_physics_step",
+            "qualification_status": "unqualified",
+            "native_gpu_qualified": False,
+            "exact_triangle_rgb_depth_qualified": False,
+            "same_step_restore_qualified": False,
+            "folded_backface_depth_qualified": False,
+            "debug_policy_isolation_qualified": False,
+            "matte_material_qualified": False,
+            "qualification_inherited": False,
+        }
 
     def _assert_physics_topology_unchanged(self):
         if (
@@ -155,6 +202,7 @@ class PhysicsMeshRendering:
         self._assert_physics_topology_unchanged()
         if any(not np.array_equal(a, b) for a, b in zip(before, self._state_arrays(), strict=True)):
             raise RuntimeError("identity render support installation changed physics state")
+        self._identity_supports_installed = True
 
     def install_two_sided_depth(self, camera):
         """Enable calibrated centre-ray depth without dropping folded backfaces."""
@@ -186,3 +234,4 @@ class PhysicsMeshRendering:
         _install_two_sided_depth_program(target, RenderFlags)
         if any(not np.array_equal(a, b) for a, b in zip(before, self._state_arrays(), strict=True)):
             raise RuntimeError("depth program installation changed physics state")
+        self._depth_renderers[camera.uid] = f"{type(target).__module__}.{type(target).__name__}"
