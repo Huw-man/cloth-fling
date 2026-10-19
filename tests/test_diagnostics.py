@@ -87,6 +87,129 @@ def test_primitive_selection_rejected_before_backend_access(primitives):
         run_diagnostic(object(), primitives=primitives)
 
 
+@pytest.mark.parametrize("primitives", [("laydown",), ("fling",), ("laydown", "fling")])
+def test_requested_video_collision_blocks_before_backend_access(tmp_path, primitives):
+    (tmp_path / "video" / f"diagnostic-{primitives[-1]}").mkdir(parents=True)
+    with pytest.raises(FileExistsError, match="fresh directory"):
+        run_diagnostic(object(), output_dir=tmp_path, primitives=primitives, record_video=True)
+
+
+def test_final_restore_failure_overrides_valid_action_without_discarding_it(short_config, tmp_path):
+    env = FakeClothBackend()
+    restore = env.restore
+    restores = 0
+
+    def fail_final_readback(state):
+        nonlocal restores
+        observation = restore(state)
+        restores += 1
+        if restores == 2:
+            env.positions[0, 0] += 0.001
+        return observation
+
+    env.restore = fail_final_readback
+    report = run_diagnostic(
+        env,
+        primitive_config=short_config,
+        primitives=("laydown",),
+        output_dir=tmp_path,
+    )
+    assert len(report["runs"]) == 1 and report["runs"][0]["execution_valid"]
+    assert not report["execution_valid"] and not report["final_restore_valid"]
+    assert any(e.get("stage") == "final_restore" for e in report["errors"])
+    assert env.attach_calls == 1 and env.reset_calls == 0
+    assert (tmp_path / "laydown_after.png").exists()
+    assert json.loads((tmp_path / "diagnostic.json").read_text()) == report
+
+
+def test_unknown_backend_failure_is_retained_as_invalid_with_terminal_evidence(
+    short_config, tmp_path
+):
+    env = FakeClothBackend()
+    initial = env.positions.copy()
+
+    def broken_step():
+        raise RuntimeError("unclassified backend failure")
+
+    env.step = broken_step
+    report = run_diagnostic(
+        env,
+        primitive_config=short_config,
+        primitives=("laydown",),
+        output_dir=tmp_path,
+    )
+    assert not report["execution_valid"] and report["final_restore_valid"]
+    run = report["runs"][0]
+    assert not run["execution_valid"]
+    assert run["reason"] == "unexpected_RuntimeError: unclassified backend failure"
+    assert run["diagnostics"]["terminal_observation_valid"]
+    assert run["evidence"]["terminal_state"] is not None
+    assert run["diagnostics"]["errors"][0]["type"] == "RuntimeError"
+    assert env.attach_calls == env.release_calls == 1 and env.reset_calls == 0
+    np.testing.assert_array_equal(env.positions, initial)
+    assert json.loads((tmp_path / "diagnostic.json").read_text()) == report
+
+
+def test_timeout_retains_failed_recording_and_blocks_same_directory_replay(short_config, tmp_path):
+    env = FakeClothBackend()
+    initial = env.positions.copy()
+    timeout = TimeoutError("injected diagnostic interruption")
+    recorders = []
+
+    class Recorder:
+        def __init__(self, output_dir, **kwargs):
+            self.directory = output_dir
+            self.closes = 0
+            recorders.append(self)
+
+        def start_action(self, index):
+            pass
+
+        def __call__(self, backend, trace):
+            (self.directory / "partial-capture.txt").write_text(trace["phase"])
+
+        def close(self, *, complete):
+            self.closes += 1
+            assert not complete
+            return {"complete": False}
+
+    def interrupted_step():
+        raise timeout
+
+    env.step = interrupted_step
+    with pytest.raises(TimeoutError) as caught:
+        run_diagnostic(
+            env,
+            primitive_config=short_config,
+            primitives=("laydown",),
+            output_dir=tmp_path,
+            record_video=True,
+            recorder_factory=Recorder,
+        )
+    assert caught.value is timeout
+    report = json.loads((tmp_path / "diagnostic.json").read_text())
+    assert not report["execution_valid"] and report["final_restore_valid"]
+    assert report["runs"] == []
+    assert report["errors"][0]["type"] == "TimeoutError"
+    assert report["recordings"][0]["recording_failed"]
+    assert (tmp_path / "video" / "diagnostic-laydown" / "partial-capture.txt").exists()
+    assert len(recorders) == 1 and recorders[0].closes == 1
+    assert env.attach_calls == 1 and not env.attached_ids
+    assert any(record[1] for record in env.release_records)
+    np.testing.assert_array_equal(env.positions, initial)
+    # The benchmark always records diagnostics. Existing partial recordings are
+    # therefore a preflight stop, never authorization to resend physical motion.
+    with pytest.raises(FileExistsError):
+        run_diagnostic(
+            object(),
+            primitives=("laydown",),
+            output_dir=tmp_path,
+            record_video=True,
+            recorder_factory=Recorder,
+        )
+    assert len(recorders) == 1 and env.attach_calls == 1
+
+
 def test_reviewed_pairs_are_visible_resolver_feasible_and_material_ranked():
     env = FakeClothBackend()
     env.rest_positions, env.faces = square_mesh(size=0.2, spacing=0.01)
