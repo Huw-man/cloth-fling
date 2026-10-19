@@ -35,6 +35,7 @@ class Tensor:
 
 class Surface:
     vis_mode = "visual"
+    double_sided = True
 
     def model_copy(self):
         return Surface()
@@ -110,7 +111,7 @@ def layout():
     scene = SimpleNamespace(
         is_built=False, pbd_solver=solver, n_envs=0, sim=SimpleNamespace(cur_substep_local=0)
     )
-    gs = SimpleNamespace(__version__="0.4.3", Mesh=Mesh, np_float=np.float32, np_int=np.int32)
+    gs = SimpleNamespace(__version__="1.4.4", Mesh=Mesh, np_float=np.float32, np_int=np.int32)
     return scene, cloth, gs, state
 
 
@@ -157,24 +158,32 @@ def test_visual_copy_identity_supports_and_unchanged_physics(layout):
     )
 
 
-@pytest.mark.parametrize("fault", ["version", "built", "multiple", "offset", "alias"])
+@pytest.mark.parametrize(
+    "fault", ["version", "built", "multiple", "offset", "alias", "one_sided", "reordered"]
+)
 def test_reject_unsupported_prebuild_layout(layout, fault):
     scene, cloth, gs, _ = layout
     if fault == "version":
-        gs.__version__ = "0.4.4"
+        gs.__version__ = "1.4.3"
     elif fault == "built":
         scene.is_built = True
     elif fault == "multiple":
         scene.pbd_solver.entities.append(object())
     elif fault == "offset":
         cloth.vvert_start = 1
-    else:
+    elif fault == "alias":
         gs.Mesh = SimpleNamespace(from_attrs=lambda **_: cloth.mesh)
+    elif fault == "one_sided":
+        cloth.surface.double_sided = False
+    else:
+        gs.Mesh = SimpleNamespace(
+            from_attrs=lambda **kw: Mesh(kw["verts"][::-1], kw["faces"], kw["surface"])
+        )
     with pytest.raises(RuntimeError):
         PhysicsMeshRendering(scene, cloth, gs)
 
 
-@pytest.mark.parametrize("fault", ["not_built", "batched", "count", "faces"])
+@pytest.mark.parametrize("fault", ["not_built", "batched", "count", "faces", "support_shape"])
 def test_reject_unsupported_built_layout(layout, fault):
     scene, cloth, gs, _ = layout
     adapter = PhysicsMeshRendering(scene, cloth, gs)
@@ -185,6 +194,8 @@ def test_reject_unsupported_built_layout(layout, fault):
         scene.pbd_solver._n_vverts += 1
     elif fault == "faces":
         cloth._vfaces[0, 0] = 1
+    elif fault == "support_shape":
+        scene.pbd_solver.vverts_info.support_idxs.value = np.zeros((4, 2))
     with pytest.raises(RuntimeError):
         adapter.install_identity_supports()
 

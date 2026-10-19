@@ -17,9 +17,10 @@ from cloth_fling.replay import (
     ReplayAction,
     load_replay,
     main,
+    render_recorded_state,
     render_replay,
-    replay_state,
     sample_traces,
+    source_engine_identity,
     validate_action,
 )
 from cloth_fling.sim.backend import _state_hash
@@ -27,6 +28,9 @@ from cloth_fling.sim.backend import _state_hash
 
 def snapshot():
     state = {
+        "schema_version": 1,
+        "faces": np.array([[0, 1, 2]], dtype=np.int32),
+        "rest_positions": Env().p.copy(),
         "positions": Env().p.copy(),
         "velocities": Env().v.copy(),
         "free": np.ones(3, dtype=bool),
@@ -111,6 +115,8 @@ def test_old_dataset_loads_invalid_attempts_and_negative_coverage(tmp_path):
     assert not actions[0].execution_valid
     assert actions[0].traces[-1]["coverage"] < actions[0].traces[0]["coverage"]
     assert origin["source_manifest_sha256"]
+    assert origin["source_engines"][0]["version"] == "0.4.3"
+    assert origin["runtime_qualification_inherited"] is False
     with pytest.raises(ValueError, match="no replay actions"):
         load_replay(root, episode_id=99)
 
@@ -158,16 +164,18 @@ def test_malformed_trajectory_rejected_before_simulator(mutation):
         validate_action(ReplayAction("one", snapshot(), t, 0.2, True, "ok", {}, {}))
 
 
-def test_replay_snapshot_clears_physics_attachments_and_preserves_source():
+def test_render_only_import_preserves_source_and_records_old_engine():
     state = snapshot()
     old = copy.deepcopy(state)
-    trace = traces()[1]
-    result = replay_state(state, trace)
-    assert result["free"].all()
-    assert result["state_hash"] == _state_hash(result)
-    np.testing.assert_array_equal(result["positions"], trace["cloth_positions_m"])
-    np.testing.assert_array_equal(state["positions"], old["positions"])
+    env = ReplayEnv(SceneConfig(image_size=16))
+    render_recorded_state(env, state, traces()[1])
+    render_recorded_state(env, state, traces()[2])
+    assert env.geometry_imports == 1
+    np.testing.assert_array_equal(env.p, traces()[2]["cloth_positions_m"])
     assert state["state_hash"] == old["state_hash"]
+    for key in ("positions", "free", "rest_positions", "faces"):
+        np.testing.assert_array_equal(state[key], old[key])
+    assert source_engine_identity(state)["version"] == "0.4.3"
 
 
 class ReplayEnv(Env):
@@ -176,20 +184,100 @@ class ReplayEnv(Env):
         self.config = config
         self.attached_ids = ()
         self.particle_diameter = 0.01
+        self.faces = snapshot()["faces"].copy()
+        self.rest_positions = snapshot()["rest_positions"].copy()
+        from types import SimpleNamespace
+
+        self.cloth = SimpleNamespace(set_particles_pos=self.set_recorded_positions)
+        self.geometry_imports = 0
 
     def restore(self, state):
+        raise AssertionError("physical snapshot restore forbidden in geometry replay")
+
+    def restore_recorded_geometry(self, state):
+        self.geometry_imports += 1
         # If replay calls a physics hook, the installed guard must fail.
         for obj in (self, self.scene):
-            with pytest.raises(RuntimeError, match="never step"):
-                obj.step()
+            if hasattr(obj, "step"):
+                with pytest.raises(RuntimeError, match="never step"):
+                    obj.step()
         self.p = state["positions"].copy()
-        self.v = state["velocities"].copy()
+
+    def set_recorded_positions(self, positions):
+        self.p = positions.copy()
 
     def __enter__(self):
         return self
 
     def __exit__(self, *_):
         pass
+
+
+@pytest.mark.parametrize("key", ["faces", "rest_positions"])
+def test_topology_mismatch_or_missing_recorded_geometry_fails_before_import(key):
+    state = snapshot()
+    env = ReplayEnv(SceneConfig(image_size=16))
+    env.restore_recorded_geometry = lambda *a, **kw: pytest.fail(
+        "must not import mismatched geometry"
+    )
+    state[key] = state[key].copy()
+    state[key].flat[0] += 1
+    with pytest.raises(ValueError, match=f"{key} mismatch"):
+        render_recorded_state(env, state, traces()[0])
+    del state[key]
+    with pytest.raises(ValueError, match=f"requires recorded {key}"):
+        render_recorded_state(env, state, traces()[0])
+
+
+def test_no_fallback_to_physical_restore_and_exact_import_readback():
+    env = ReplayEnv(SceneConfig(image_size=16))
+    env.restore_recorded_geometry = None
+    with pytest.raises(RuntimeError, match="physical restore is forbidden"):
+        render_recorded_state(env, snapshot(), traces()[0])
+    env.restore_recorded_geometry = lambda *a, **kw: None
+    env.cloth.set_particles_pos = lambda *a: None
+    with pytest.raises(RuntimeError, match="readback differs"):
+        render_recorded_state(env, snapshot(), traces()[1])
+
+
+def test_new_schema_requires_explicit_engine_identity():
+    with pytest.raises(ValueError, match="missing its source engine"):
+        source_engine_identity({"schema_version": 2})
+    identity = {"engine": "genesis", "engine_version": "1.4.4", "physics_schema_version": 2}
+    result = source_engine_identity(
+        {"schema_version": 2, "runtime_identity_json": json.dumps(identity)}
+    )
+    assert result["backend_identity"] == identity
+    assert result["version"] == "1.4.4"
+
+
+def test_default_factory_uses_new_template_and_keeps_archival_source_config(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import cloth_fling.replay as replay
+    import cloth_fling.sim.backend as backend
+
+    root = tmp_path / "data"
+    dataset(root)
+
+    # Model the runtime-owned v2 contract without changing contracts in this
+    # isolated rendering branch. The integrated contract accepts v2 directly.
+    class TemplateConfig(SimpleNamespace):
+        def to_dict(self):
+            return vars(self).copy()
+
+    monkeypatch.setattr(replay, "SceneConfig", lambda **kw: TemplateConfig(**kw))
+    monkeypatch.setattr(backend, "GenesisBackend", ReplayEnv)
+    metadata = render_replay(root, tmp_path / "video", writer_factory=Encoder)
+    assert all(
+        c["contact_profile"] == "native_coulomb_v2"
+        for c in metadata["render_template_configs"].values()
+    )
+    assert all(
+        c.get("contact_profile", "legacy_mg_v1") == "legacy_mg_v1"
+        for c in metadata["source_configs"].values()
+    )
+    assert metadata["source_engines"][0]["version"] == "0.4.3"
 
 
 def test_full_replay_cpu_framewriter_metadata_and_dataset_immutable(tmp_path):
@@ -203,6 +291,12 @@ def test_full_replay_cpu_framewriter_metadata_and_dataset_immutable(tmp_path):
     assert metadata["physics_reexecuted"] is False
     assert metadata["captured_during_execution"] is False
     assert metadata["original_video_recorded"] is False
+    assert metadata["source_engines"][0]["version"] == "0.4.3"
+    assert metadata["renderer_engines"][0]["version"] == "1.4.4"
+    assert metadata["runtime_qualification_inherited"] is False
+    for video in metadata["videos"]:
+        assert video["renderer_engines"] == metadata["renderer_engines"]
+        assert video["source_engines"] == metadata["source_engines"]
     assert metadata["videos"][-1]["frames"] == 5
     assert metadata["videos"][-1]["dimensions"] == [768, 384]
     assert len(metadata["original_observations"]) == 2
@@ -231,6 +325,7 @@ class Block:
         if fullname.split('.')[0] in {'genesis', 'torch', 'imageio', 'imageio_ffmpeg'}:
             raise RuntimeError('forbidden import: ' + fullname)
 sys.meta_path.insert(0, Block())
+import cloth_fling.sim.render_mesh
 from cloth_fling.replay import main
 assert main([sys.argv[1], '--inspect']) == 0
 """

@@ -1,5 +1,52 @@
 # Visual capture and saved-trajectory replay
 
+## Genesis 1.4.4 migration status
+
+Rendering targets the stable 1.4.4 wheel (2026-10-11, upstream `a649105`),
+not the old project `.venv`. Use the coordinator-prepared shared latest-runtime
+Python with `PYTHONPATH=$PWD/src`; do not import the inspection wheel as a runtime.
+CPU checks are separate from native GPU qualification. No 0.4.3 visual/contact or
+behavior qualification carries forward. Cloth-motion campaigns remain paused.
+GPU scenes require the coordinator's exclusive lease.
+
+### Native-source audit and retained adapters
+
+The inspected release sources are [PBD entities](https://github.com/Genesis-Embodied-AI/genesis-world/blob/a649105/genesis/engine/entities/pbd_entity.py),
+[PBD render fields](https://github.com/Genesis-Embodied-AI/genesis-world/blob/a649105/genesis/engine/solvers/pbd_solver.py),
+[rasterizer context](https://github.com/Genesis-Embodied-AI/genesis-world/blob/a649105/genesis/vis/rasterizer_context.py),
+[depth shader dispatch](https://github.com/Genesis-Embodied-AI/genesis-world/blob/a649105/genesis/ext/pyrender/renderer.py),
+[material conversion](https://github.com/Genesis-Embodied-AI/genesis-world/blob/a649105/genesis/utils/mesh.py),
+and [camera](https://github.com/Genesis-Embodied-AI/genesis-world/blob/a649105/genesis/vis/camera.py).
+
+- Native PBD still copies/remeshes the input visual mesh for physics and computes
+  visual vertices by weighted particle supports. Native rendering is therefore
+  not guaranteed to draw exact physical triangles through folds. Retain a detached
+  physics-topology visual copy and identity supports. The 1.4.4 adapter checks
+  entity/offset/batch layout, copy independence, exact vertex/face order, field
+  shapes, device readback and unchanged physical state. No whitelist permits the
+  old 0.4.3 adapter to run on a new version.
+- Native depth-only dispatch still forces backface culling and selects
+  `mesh_depth.vert` without a two-sided geometry shader. Retain the camera-local
+  segmentation-program substitution for double-sided depth. It keeps the native
+  pixel-centre transform and depth readback; no depth rescaling is introduced.
+  Inspect the installed shader-dispatch source before patching and reject an
+  unreviewed dispatch. Folded-ray correctness still requires a leased GPU check.
+- Native non-emissive image material conversion still uses `SimpleMaterial`
+  without the requested PBR factors. Retain the table-visual-only PBR/UV adapter
+  and inspect actual native roughness .8, metallic 0, texture and UVs after build.
+  Rigid visual geometry now resolves through its descriptor; its public `vmesh`
+  still exposes the exact trimesh passed into native rasterization.
+- Native 1.4.4 raster cameras skip markers unless `camera.debug` is true. Scope
+  `_debug=True` to synchronous RGB-only debug capture and restore it on success
+  and failure, including batched pose tensors. Reject raytracer/batch-renderer
+  cameras. Marker primitives remain native debug objects, excluded from shadow
+  passes. Never request marker depth or modify policy caches.
+
+No adapter was removed based on a version assumption. The existing initial draw
+is retained as buffer-upload warmup pending native qualification; there is no
+same-step cache patch here, only native `force_render=True`. Public 1.4.4 setters
+and native rendering refresh are used without a physics step.
+
 These tools produce privileged debug/evaluation artifacts. Policy input remains the
 original RGB observation. Debug markers, geometry, depth, overlays and clearance
 must never enter learned RGB input. Appearance applies to the **table only**;
@@ -15,12 +62,13 @@ is local, so appearance cannot perturb the physics random generator.
 
 The native table raster material is PBR, with a real color texture and UVs. The
 adapter verifies the actual native material roughness, metallic and texture after
-build. Merely setting Genesis surface options is insufficient in Genesis 0.4.3:
+build. Merely setting Genesis surface options is insufficient in Genesis 1.4.4:
 its default SimpleMaterial conversion can lose the requested PBR values.
 
 ## Backend integration (contact/coordinator owned)
 
-No physical contract or snapshot schema change is needed. Keep the constructor
+Physical snapshots now use runtime-owned schema 2 with engine identity; 0.4.3
+schema 1 cannot be physically restored. Keep the constructor
 keyword `appearance: AppearanceConfig | None = None`. Preserve cloth construction.
 
 ```python
@@ -42,8 +90,8 @@ if appearance is not None:
     install_native_material(self.scene, self.table, gs, appearance)
 ```
 
-Keep appearance metadata separate from the physical snapshot. Old snapshots keep
-their original physical hash/schema. Canonical physical config hashing is sorted
+Keep appearance metadata separate from the physical snapshot. Archived snapshots keep
+their original physical hash/schema and are imported only as recorded geometry. Canonical physical config hashing is sorted
 JSON with separators `(',', ':')`, excluding appearance. Video metadata records
 that independent hash and the selected appearance for each output video. A visual
 appearance override during replay changes re-rendered pixels, not source physics.
@@ -65,8 +113,8 @@ do not keep markers visible. Native markers are debug objects, never entities.
 
 Run capture synchronously on the scene owner's thread, outside `observe()`.
 Every created marker has scoped cleanup, including partial creation/render failures;
-unrelated debug objects remain. A `try/finally` restores camera transform and its
-redundant native pose fields. This path never calls `observe`, changes the cached
+unrelated debug objects remain. A `try/finally` restores camera transform, debug flag and its
+redundant native batched pose fields, even when rendering fails. This path never calls `observe`, changes the cached
 policy RGB/depth, steps physics, or requests debug depth. Debug objects are removed
 before subsequent clean policy rendering, preventing marker pixels/shadows/depth
 from entering the learner view. Backend native camera recording must be disabled
@@ -117,7 +165,8 @@ Overlays show capture type, action, phase, coverage and minimum cloth clearance:
 clearance proxy, not a native-contact claim. Negative values and coverage losses
 are preserved. Render failures propagate and mark recorder metadata incomplete.
 
-Metadata includes each video's hash, dimensions, nominal fps, frame count,
+Metadata includes source and renderer engine identities, runtime generation,
+`runtime_qualification_inherited=false`, each video's hash, dimensions, nominal fps, frame count,
 `native_render_capture` type, physical config hash and appearance. Actual trace
 timestamps are recorded: this sampled callback cannot recover states between
 traces, and phase boundary samples can change nominal playback timing. For smoother
@@ -141,7 +190,8 @@ python -m cloth_fling.replay runs/diagnostic/diagnostic.json \
 The module CLI returns 0 on success and 1 for source/rendering errors; argument
 errors return argparse's code 2. It prints metadata and never opens a browser.
 `--inspect` validates either format on CPU without constructing a simulator.
-`--appearance legacy` (default) preserves old table pixels; a JSON path also works.
+`--appearance legacy` (default) selects the old dark table appearance;
+new-runtime pixels are newly rendered and need not equal old-runtime pixels; a JSON path also works.
 The installed top-level CLI may delegate to `cloth_fling.replay.main(argv)`;
 `render_replay(...)` returns the same metadata for Python callers.
 
@@ -157,9 +207,29 @@ and topology mismatch fail clearly. Source outputs remain byte-for-byte untouche
 Replay uses the **last recorded mesh at or before each requested frame time**,
 with no interpolation. Duplicate phase timestamps select the last recorded trace.
 The final sample is included. Saved attachment IDs only control debug visibility;
-physics snapshot attachment flags are cleared for restoration. Replay replaces
-`env.step/reset` and `scene.step/reset` with guards that raise. It restores saved
-mesh states and renders, with no reset generator or physical re-execution.
+the saved free/velocity fields are not restored as physics. The public
+`cloth_fling.replay.render_recorded_state(env, source_state, trace)` wrapper uses
+runtime-owned `env.restore_recorded_geometry(source_state)` to validate the
+untouched source hash, exact faces/edges/rest vertices and mesh identity, then
+latch that backend into render-only mode. Subsequent frames use the native public
+`cloth.set_particles_pos` setter and forced native rendering. The wrapper checks
+exact position readback; there is no interpolation, remapping or physical snapshot
+schema conversion. Missing faces/rest vertices or different triangulation/order
+fail with a specific error before import. A different new remesh requires another
+explicit raw-mesh renderer; none is silently substituted here.
+
+The built-in backend factory constructs a 1.4.4 template with
+`native_coulomb_v2`, retaining the recorded geometry/material/config values.
+This is an explicit render-template choice; its contact law is never executed.
+Injected test/custom backend factories own their template configuration. Metadata
+records untouched `source_configs` separately from `render_template_configs`
+(and the existing `physics_configs` compatibility field). The source engine comes
+from `runtime_identity_json` in schema 2; schema 1 is labelled Genesis 0.4.3.
+The renderer engine comes from the loaded backend, never the source snapshot.
+Replay guards `env.step/reset/restore` and `scene.step/reset`; the runtime latch
+also rejects physical reuse. The constructor and geometry hook must never step
+or generate a reset. Physical schema-2 restore remains independent and rejects
+archival schema 1.
 
 Choose a fresh output directory **outside** the source dataset/diagnostic directory.
 Outputs include the videos above, original before/after observation PNG copies,
@@ -169,8 +239,8 @@ hashes. Reconstructed outputs explicitly say `reconstructed_replay`,
 `original_video_recorded=false`, `physics_reexecuted=false`, and
 `captured_during_execution=false`. `--max-frames` bounds rendering and labels
 truncation. These are newly rendered saved trajectories, never original execution
-video. Old physical snapshot/config compatibility remains the backend owner's
-responsibility; unknown physical fields are not silently discarded.
+video. Archival physical state compatibility is never claimed; unknown physical fields
+are not silently discarded or imported as new-runtime physical state.
 
 ## Validation scope
 
@@ -182,7 +252,10 @@ exclusive lease after the contact gate; CPU tests do not establish native render
 or RTX 5080 qualification. Review the actual integrated output before accepting
 appearance and rendering isolation.
 
-### Bounded native qualification (milestone 2)
+### Historical Genesis 0.4.3 qualification (milestone 2 only)
+
+The following results are archival. They do not qualify Genesis 1.4.4. Existing
+video artifacts and provenance remain unchanged by the migration.
 
 On the integrated native-contact backend, the exclusive RTX 5080 check passed
 with Genesis 0.4.3 on `cuda:0`. It constructed a flat static scene and **never
