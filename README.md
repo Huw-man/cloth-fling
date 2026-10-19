@@ -23,6 +23,8 @@ uv run --locked --extra dev pytest -m 'not gpu'
 For simulation, use Linux with a CUDA-capable NVIDIA GPU and a driver compatible
 with CUDA 12.8. The `sim` extra explicitly includes CUDA 12.8 Torch wheels; Genesis
 does not declare Torch itself. The intended development target is one RTX 5080.
+Headless rendering also requires a working EGL/OpenGL driver runtime; `doctor --probe`
+checks scene construction and actual RGB/depth rendering in the selected environment.
 
 ```bash
 uv sync --locked --extra sim --extra dev
@@ -59,8 +61,9 @@ uv run --locked cloth-fling dataset verify runs/episodes-11
 Use `--primitive fling` to inspect the dynamic candidate. Keep broad collection
 behind the primitive diagnostic gate in [the milestone](docs/milestone.md).
 CLI reset and collection defaults use `fold`. Random single-point `drop` preparation
-is available explicitly, but tested seeds failed table containment; its distribution
-is unqualified. Those failures are recorded, with no fallback to a different reset.
+is available explicitly. One seed passes the current runtime check, but its distribution
+is unqualified; earlier configurations failed containment. Failures are recorded, with
+no fallback to a different reset.
 The controlled baseline is lift, tauten, diagonal laydown, drag, then release.
 The fling candidate retains both grasps through swing, lowering and placement;
 it releases near the table. Both remain configurable independently of selection.
@@ -91,6 +94,8 @@ visible geometry for a separate baseline. No learned policy is included yet.
 
 See [runtime qualification](docs/runtime.md), [primitive diagnostics](docs/primitives.md),
 and [dataset format](docs/dataset.md) for implementation details and measured limits.
+The [first milestone results](docs/milestone1-results.md) record the verified episode,
+matched primitive comparison, and remaining qualification work.
 
 ## Development
 

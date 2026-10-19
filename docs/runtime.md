@@ -18,6 +18,11 @@ Outer physics dt is 2 ms with four substeps. `max_stretch_solver_iterations` is 
 the current configuration uses 64. Bounded frozen-state lift checks showed substantial
 iteration sensitivity, so Genesis's default four sweeps were inadequate for this slice.
 More iterations alone do not establish physical fidelity or convergence of every phase.
+Genesis currently ties 1 cm remeshing spacing to a 1 cm particle collision diameter
+(5 mm support radius). This is a coarse contact thickness, not a measured fabric
+thickness. Near-table placement uses 20 mm; the former 8 mm target could squeeze a
+held layer into the lower layer's collision envelope. The hard 10% strain guard and
+0.01 m/s settling criterion were preserved during the correction.
 
 **Table contact is an explicit adaptation.** Genesis 0.4.3's legacy PBD/rigid coupling
 resolves normal contact without tangential friction. `sim/contact.py` adds a Coulomb
