@@ -324,8 +324,9 @@ class GenesisBackend:
         for _ in range(count):
             if self.attached_ids:
                 current = self.get_positions()[list(self.attached_ids)]
-                # Four substeps each integrate this velocity for dt/4. No free
-                # particle position/velocity writes occur in this stepping path.
+                # Four substeps integrate this attachment command for dt/4.
+                # Separate table-contact physics may dissipate free-particle
+                # tangential velocity; motion commands never touch those particles.
                 velocity = (self._targets - current) / self.config.sim_dt
                 self.cloth.set_particles_vel(velocity, list(self.attached_ids))
             self.scene.step()

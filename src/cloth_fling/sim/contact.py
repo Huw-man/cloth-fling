@@ -22,7 +22,7 @@ def table_friction_velocities(
     gravity=9.81,
 ):
     """Apply a dissipative contact impulse; leave normal velocities and positions unchanged."""
-    p, v = np.asarray(positions), np.asarray(velocities)
+    p, v = np.asarray(positions, dtype=float), np.asarray(velocities, dtype=float)
     free = np.asarray(free, dtype=bool)
     if p.ndim != 2 or p.shape[1] != 3 or v.shape != p.shape or free.shape != (len(p),):
         raise ValueError("contact arrays must be N x 3 with an N-element free mask")
@@ -39,6 +39,7 @@ def table_friction_velocities(
         free
         & (p[:, 2] <= radius + 1e-6)
         & (p[:, 2] >= radius - 1e-4)
+        & (v[:, 2] <= 1e-6)
         & (np.abs(p[:, :2]) <= table_size / 2).all(axis=1)
     )
     speed = np.linalg.norm(v[:, :2], axis=1)

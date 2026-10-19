@@ -50,3 +50,14 @@ def test_contact_deceleration_uses_physical_dt_and_stops_without_reversing():
     np.testing.assert_allclose(0.1 - full[0, 0], 0.15 * 9.81 * 0.004)
     stopped, _ = apply(p, np.array([[0.0001, 0, 0]]), [True])
     assert stopped[0, 0] == 0
+
+
+def test_separating_particles_are_not_friction_contacts_and_integer_inputs_are_safe():
+    p = np.array([[0, 0, 0.005]])
+    separating = np.array([[0.1, 0, 1.0]])
+    result, changed = apply(p, separating, [True])
+    np.testing.assert_array_equal(result, separating)
+    assert len(changed) == 0
+    result, changed = apply(p, np.array([[1, 0, 0]], dtype=int), [True])
+    assert result.dtype.kind == "f"
+    assert 0 < result[0, 0] < 1
