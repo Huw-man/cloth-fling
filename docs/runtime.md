@@ -9,9 +9,10 @@ offline checks and subsequent runtime/contact/rendering qualification.
 
 Importing the package, CLI, provenance or offline dataset readers does not import or
 initialize Genesis/Torch. `cloth-fling doctor` reports installed distribution versions
-and GPU visibility without building a scene. The shared migration environment is
-separate from the retained Genesis 0.4.3 root environment. Other worktrees must select
-their own source through `PYTHONPATH` when using that shared interpreter.
+and GPU visibility without building a scene. The root `.venv` is now upgraded from
+the lock. A separate environment under ignored `runs/genesis144/venv` supported the
+migration; worktrees using its interpreter must select their own source through
+`PYTHONPATH`. Neither environment is a dependency of the installed package.
 
 ```bash
 export UV_CACHE_DIR=/tmp/cloth-fling-uv-cache

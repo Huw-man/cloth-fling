@@ -37,9 +37,9 @@ uv sync --locked --extra sim --extra dev --extra video
 uv run --locked --extra sim --extra dev --extra video cloth-fling doctor
 ```
 
-During migration, set `UV_PROJECT_ENVIRONMENT` to the coordinator-provided shared
-migration environment before syncing or running. Preserve the historical root `.venv`
-until integration. `doctor` reads package metadata and GPU visibility without importing
+The normal root `.venv` now uses the upgraded lock. The isolated environment under
+ignored `runs/genesis144/venv` was used to prepare the port before replacing the old
+installation. `doctor` reads package metadata and GPU visibility without importing
 or initializing Genesis/Torch. Installation and GPU visibility alone are not physics
 or rendering qualification. See [runtime checks](docs/runtime.md) for the separately
 leased, bounded upgraded-runtime probe.

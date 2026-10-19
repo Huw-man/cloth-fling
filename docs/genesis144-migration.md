@@ -16,8 +16,9 @@ neighboring source checkout. No system/global Python installation is changed.
 
 Project and import version advance from 0.1.0 to **0.2.0** because engine and physical
 snapshot compatibility change. This is a local package boundary, without a tag or
-publication. Historical Genesis 0.4.3 artifacts and the historical root `.venv` are
-preserved until coordinator integration. Previous milestone acceptance does not transfer.
+publication. Historical Genesis 0.4.3 artifacts remain unchanged. The coordinator
+upgraded the root `.venv` from the lock after source integration; the separate migration
+environment was installed first. Previous milestone acceptance does not transfer.
 Cloth-motion diagnostics, primitive tuning, collection and training remain paused.
 
 ## Dependencies and interpreter
@@ -80,7 +81,9 @@ export MPLCONFIGDIR=/tmp/cloth-fling-matplotlib
 ```
 
 These variables relocate caches; they do not change the engine, contact law or GPU policy.
-The root historical environment is not upgraded by this installation.
+That initial shared-environment installation left the root environment unchanged.
+After integration, the coordinator separately synced the root `.venv` with the same
+locked `sim`, `dev` and `video` extras; it now reports Genesis 1.4.4 and package 0.2.0.
 
 ## Contact, snapshots and rendering
 
