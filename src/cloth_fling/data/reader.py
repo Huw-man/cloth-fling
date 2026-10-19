@@ -231,6 +231,12 @@ def verify_dataset(path) -> dict:
                 and reset["reset_kind"] == episode["reset_kind"],
                 f"{label}: reset generator/cloth identity mismatch",
             )
+            if "metadata" in episode or "episode_metadata" in reset:
+                require(
+                    isinstance(episode.get("metadata"), dict)
+                    and episode.get("metadata") == reset.get("episode_metadata"),
+                    f"{label}: episode metadata mismatch",
+                )
             family_hash = reset_family_hash(
                 config_sha256=sha256(json_bytes(reset["config"])),
                 cloth_id=reset["cloth_id"],
@@ -431,6 +437,162 @@ def verify_dataset(path) -> dict:
                 label,
                 valid=bool(episode_rows and episode_rows[-1]["execution_valid"]),
             )
+            if episode.get("collection_summary"):
+                summary = read_bundle(root, episode["collection_summary"]["path"])
+                for key in (
+                    "episode_id",
+                    "seed",
+                    "split",
+                    "reset_group_id",
+                    "cloth_id",
+                    "reset_id",
+                    "config_sha256",
+                    "end_reason",
+                    "metadata",
+                ):
+                    require(
+                        summary[key] == episode[key], f"{label}: collection summary {key} mismatch"
+                    )
+                valid_count = sum(row["execution_valid"] for row in episode_rows)
+                require(
+                    summary["attempts"] == len(episode_rows)
+                    and summary["valid"] == valid_count
+                    and summary["invalid"] == len(episode_rows) - valid_count,
+                    f"{label}: collection summary attempt counts mismatch",
+                )
+                expected_lifecycle = (
+                    "initially_unfolded"
+                    if episode["end_reason"] == "initially_unfolded"
+                    else "unfolded_after_action"
+                    if episode["end_reason"] == "settled_coverage_threshold"
+                    else "stopped_without_threshold"
+                )
+                require(
+                    summary["lifecycle"] == expected_lifecycle,
+                    f"{label}: collection summary lifecycle mismatch",
+                )
+                initial_id = (
+                    episode["initial_observation"]["observation_id"]
+                    if episode["initial_observation"]
+                    else None
+                )
+                require(
+                    summary["initial_observation_id"] == initial_id,
+                    f"{label}: collection summary initial observation mismatch",
+                )
+                initial_source = summary["initial_settlement_source"]
+                confirmed = summary["initial_confirmed_settled_coverage"]
+                confirmed_id = initial_id if initial_source else None
+                confirmed_source = initial_source
+                if initial_source:
+                    velocities = np.asarray((reset.get("state") or {}).get("velocities", []))
+                    velocity_valid = (
+                        velocities.ndim == 2
+                        and velocities.shape[1] == 3
+                        and len(velocities) > 0
+                        and np.isfinite(velocities).all()
+                    )
+                    rms = (
+                        float(np.sqrt(np.mean(np.sum(velocities**2, axis=1))))
+                        if velocity_valid
+                        else None
+                    )
+                    require(
+                        initial_id is not None
+                        and confirmed is not None
+                        and _close(confirmed, summary["initial_coverage"])
+                        and rms is not None
+                        and rms < 0.01
+                        and _close(rms, summary["initial_rms_speed_m_s"]),
+                        f"{label}: initial settled coverage lacks velocity/observation evidence",
+                    )
+                    require(
+                        (source is None and initial_source == "successful_reset_contract")
+                        or (
+                            source is not None
+                            and initial_source == "certified_restored_fixture"
+                            and episode["metadata"].get("initial_settled") is True
+                        ),
+                        f"{label}: initial settlement lacks reset certification",
+                    )
+                    initial_state = reset.get("state") or {}
+                    for key in ("attached_ids", "attached_particle_ids", "attachments"):
+                        if key in initial_state:
+                            require(
+                                initial_state[key] is not None and len(initial_state[key]) == 0,
+                                f"{label}: initial settled state has attachments",
+                            )
+                    if "free" in initial_state:
+                        require(
+                            np.asarray(initial_state["free"], dtype=bool).all(),
+                            f"{label}: initial settled state has attachments",
+                        )
+                    if "attachment_count" in initial_state:
+                        require(
+                            initial_state["attachment_count"] == 0,
+                            f"{label}: initial settled state has attachments",
+                        )
+                else:
+                    require(confirmed is None, f"{label}: unconfirmed initial settled coverage")
+                for row in episode_rows:
+                    evidence = read_bundle(root, row["evidence_path"])
+                    diagnostics = evidence["diagnostics"]
+                    if (
+                        row["execution_valid"]
+                        and diagnostics.get("settled") is True
+                        and diagnostics.get("terminal_observation_valid") is not False
+                        and row["after_observation_id"] is not None
+                        and row["after_observation_id"] != row["before_observation_id"]
+                    ):
+                        confirmed = row["coverage_after"]
+                        confirmed_id = row["after_observation_id"]
+                        confirmed_source = "valid_settled_action"
+                require(
+                    _close(summary["last_confirmed_settled_coverage"], confirmed)
+                    and summary["last_confirmed_settled_observation_id"] == confirmed_id
+                    and summary["last_confirmed_settlement_source"] == confirmed_source,
+                    f"{label}: last confirmed settled coverage mismatch",
+                )
+                last_observed = (
+                    episode_rows[-1]["coverage_after"]
+                    if episode_rows
+                    else summary["initial_coverage"]
+                )
+                last_id = (
+                    episode["last_observation"]["observation_id"]
+                    if episode["last_observation"]
+                    else None
+                )
+                require(
+                    _close(summary["last_observed_coverage"], last_observed)
+                    and summary["last_observation_id"] == last_id
+                    and summary["last_observed_execution_valid"]
+                    == (episode_rows[-1]["execution_valid"] if episode_rows else None),
+                    f"{label}: observed terminal coverage mismatch",
+                )
+                if episode["end_reason"] in ("initially_unfolded", "settled_coverage_threshold"):
+                    require(
+                        episode["terminated"] and not episode["truncated"],
+                        f"{label}: threshold closure terminal flags mismatch",
+                    )
+                    threshold = summary["settled_coverage_threshold"]
+                    require(
+                        threshold is not None
+                        and 0 < threshold <= 1
+                        and confirmed is not None
+                        and confirmed >= threshold,
+                        f"{label}: threshold closure lacks confirmed settled coverage",
+                    )
+                    require(
+                        (episode["end_reason"] == "initially_unfolded" and not episode_rows)
+                        or (
+                            episode["end_reason"] == "settled_coverage_threshold"
+                            and bool(episode_rows)
+                            and episode_rows[-1]["execution_valid"]
+                            and confirmed_id == episode_rows[-1]["after_observation_id"]
+                        ),
+                        f"{label}: threshold closure lifecycle mismatch",
+                    )
         for obs in manifest["observations"].values():
             rgb = read_rgb(root, obs["rgb"]["path"])
             support = read_bundle(root, obs["support"]["path"])
