@@ -312,6 +312,61 @@ pytest case directory for review. Passing these bounded checks does not promote
 primitive/contact/behavior qualification or change the renderer's unqualified
 metadata automatically.
 
+### Bounded native results on Genesis 1.4.4 (2026-10-19)
+
+All five opt-in cases passed on the exclusively leased RTX 5080 in 23.03 s,
+using the shared release environment and this worktree's source. The tested
+base was `a90a98a` plus the test counter fix: Genesis 1.4.4 exposes
+`scene.sim.cur_substep_global`, rather than the removed `scene._t`. No adapter,
+material, physics value or acceptance threshold changed during qualification.
+The final CPU regression passed 129 tests with the five GPU cases skipped;
+Ruff and whitespace checks passed.
+
+- Native PBR readback was roughness .8 and metallic 0, with finite UVs and a
+  128 x 128 achromatic texture (mean gray .5500139).
+- Selected and measured-attached spheres were visible in both native views:
+  overhead red/blue pixel counts were 12/6; oblique counts were 19/4. All
+  counts became zero after release. Commanded targets were deliberately offset
+  from the measured attachments without executing motion.
+- Scoped debug capture preserved camera debug/pose tensors, unrelated native
+  objects, physical snapshot hash, cached observation/array identity and clean
+  RGB/depth bitwise. Injected rendering failure also restored camera state and
+  removed markers. Release preserved particle velocity exactly.
+- Static folded geometry produced 115 visible-backface ray samples with maximum
+  native optical-depth error **0.0000265352 m** (26.5 micrometres), below the
+  unchanged 1 mm gate. Schema-2 NPZ restore returned exact original state and
+  RGB/depth without advancing a substep.
+- A synthetic schema-1 envelope was rejected by physical restore and accepted
+  only through the render-only geometry latch, which rejected subsequent
+  physical reuse. This synthetic boundary check remains distinct from the
+  historical source checks below.
+- `runs/milestone1/episodes-qualified` (24 source files) and
+  `runs/milestone1/primitive-comparison/diagnostic.json` (11 files in its source
+  directory) each rendered two frames. Every source file/hash remained unchanged;
+  new outputs were kept separate from pre-existing video artifacts. All six
+  encoded videos decoded to exactly two frames,
+  retained valid file hashes and distinguished source Genesis 0.4.3 from renderer
+  Genesis 1.4.4. No mesh conversion or physical re-execution occurred.
+
+Actual selected/attached/released native frames and decoded overhead/oblique
+replay frames were visually reviewed: the gray table is matte, the red/blue
+markers are visible and disappear after release, and the historical folded
+surface is visible in both views. The replay table intentionally uses the old
+dark appearance. These are static rendering and bounded reconstructed-replay
+results, not new cloth-motion, contact, reset-distribution or behavior evidence.
+The root's original full-size scene regression is a separate check.
+
+Evidence is preserved in this rendering worktree under
+`runs/genesis144/visual-native-final/`: `pytest.log`, per-case PNG/NPZ/JSON
+artifacts, two-frame replay MP4s/provenance, decoded review frames and
+`qualification.json`. `visual-native-attempt1/` retains the first run's three
+obsolete-counter test failures and two successful historical replays;
+`visual-native-attempt2/` retains the corrected three-case pass. Nothing from
+either attempt was overwritten. The final test process exited and the host
+compute-process list was empty before the visual GPU lease was explicitly
+released to the root. Renderer capability metadata remains unqualified by
+default; these reports carry the bounded host-specific results.
+
 CPU tests cover deterministic table texture and actual material readback validation,
 marker measurement/release behavior, exception cleanup, unchanged policy caches,
 camera/state preservation, writer lifecycle, both legacy formats, no-step guards,
