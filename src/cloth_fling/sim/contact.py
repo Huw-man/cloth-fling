@@ -51,3 +51,46 @@ def table_friction_velocities(
         result[ids, :2] *= (remaining / speed[ids])[:, None]
     changed = np.flatnonzero(np.any(result != v, axis=1))
     return result, changed
+
+
+def normal_impulse_friction(
+    velocities, normals, normal_impulses, masses, *, free, static_friction, kinetic_friction
+):
+    """NumPy reference for native Coulomb friction after normal response.
+
+    Unit normals and positive normal correction impulses are supplied by contact,
+    never inferred from height, gravity or a velocity threshold. Zero impulse
+    means no contact, including airborne particles. Returns velocity and impulse.
+    This reference is offline validation, not a second runtime adapter.
+    """
+    v, n = np.asarray(velocities, dtype=float), np.asarray(normals, dtype=float)
+    j, m = np.asarray(normal_impulses, dtype=float), np.asarray(masses, dtype=float)
+    free = np.asarray(free, dtype=bool)
+    if (
+        v.ndim != 2
+        or v.shape[1] != 3
+        or n.shape != v.shape
+        or j.shape != (len(v),)
+        or m.shape != j.shape
+        or free.shape != j.shape
+    ):
+        raise ValueError("invalid impulse array shapes")
+    if (
+        not all(np.isfinite(a).all() for a in (v, n, j, m))
+        or np.any(m <= 0)
+        or np.any(j < 0)
+        or not np.allclose(np.linalg.norm(n, axis=1), 1)
+        or not np.isfinite([static_friction, kinetic_friction]).all()
+        or not 0 <= kinetic_friction <= static_friction
+    ):
+        raise ValueError("invalid impulse physics inputs")
+    tangent = v - np.sum(v * n, axis=1)[:, None] * n
+    speed = np.linalg.norm(tangent, axis=1)
+    stop = m * speed
+    amount = np.minimum(stop, kinetic_friction * j)
+    amount[stop <= static_friction * j] = stop[stop <= static_friction * j]
+    amount[~free] = 0
+    impulse = (
+        -tangent * np.divide(amount, speed, out=np.zeros_like(speed), where=speed > 0)[:, None]
+    )
+    return v + impulse / m[:, None], impulse

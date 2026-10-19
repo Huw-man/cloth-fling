@@ -58,11 +58,14 @@ class GenesisBackend:
 
     substeps = 4
 
-    def __init__(self, config: SceneConfig, *, backend: str = "gpu", headless: bool = True):
+    def __init__(
+        self, config: SceneConfig, *, backend: str = "gpu", headless: bool = True, appearance=None
+    ):
         self._validate_config(config)
         if backend not in ("gpu", "cpu"):
             raise ValueError("backend must be gpu or cpu")
         self.config = config
+        self.appearance = appearance
         self.simulated_time = 0.0
         self.attached_ids: tuple[int, ...] = ()
         self._targets: np.ndarray | None = None
@@ -105,14 +108,23 @@ class GenesisBackend:
                 ),
                 show_viewer=not headless,
             )
-            self.scene.add_entity(
+            table_surface = gs.surfaces.Default(color=(0.04, 0.04, 0.04, 1))
+            if appearance is not None:
+                from cloth_fling.sim.appearance import make_surface
+
+                table_surface = make_surface(gs, appearance)
+            table = self.scene.add_entity(
                 gs.morphs.Box(
                     size=(config.table_size_m, config.table_size_m, 0.04),
                     pos=(0, 0, -0.02),
                     fixed=True,
                 ),
-                surface=gs.surfaces.Default(color=(0.04, 0.04, 0.04, 1)),
+                surface=table_surface,
             )
+            if appearance is not None:
+                from cloth_fling.sim.appearance import install_visual_texture
+
+                install_visual_texture(self.scene, table, gs, appearance)
             self.cloth = self.scene.add_entity(
                 gs.morphs.Mesh(file=path, pos=(0, 0, self._initial_height)),
                 material=gs.materials.PBD.Cloth(
@@ -134,7 +146,15 @@ class GenesisBackend:
                 GUI=False,
             )
             self._physics_mesh_rendering = PhysicsMeshRendering(self.scene, self.cloth, gs)
+            if config.contact_profile == "native_coulomb_v1":
+                from cloth_fling.sim.native_contact import install_native_contact
+
+                install_native_contact(self.scene, table, config)
             self.scene.build()
+            if appearance is not None:
+                from cloth_fling.sim.appearance import install_native_material
+
+                install_native_material(self.scene, table, gs, appearance)
             self._physics_mesh_rendering.install_identity_supports()
             self._physics_mesh_rendering.install_two_sided_depth(self.camera)
             # Genesis's loader may reorder OBJ vertices. Adopt its topology, then
@@ -189,7 +209,9 @@ class GenesisBackend:
     @staticmethod
     def _validate_config(config: SceneConfig) -> None:
         data = config.to_dict()
-        if not all(np.isfinite(value) for value in data.values()):
+        if not all(
+            np.isfinite(value) for value in data.values() if isinstance(value, (int, float))
+        ):
             raise ValueError("configuration must be finite")
         positive = (
             "cloth_size_m",
@@ -349,7 +371,7 @@ class GenesisBackend:
 
     def _apply_table_friction(self) -> None:
         """Physics-only tangential Coulomb impulse after native normal contact resolution."""
-        if not self.config.table_friction:
+        if not self.config.table_friction or self.config.contact_profile != "legacy_mg_v1":
             return
         free = np.ones(len(self.rest_positions), dtype=bool)
         free[list(self.attached_ids)] = False
@@ -360,11 +382,22 @@ class GenesisBackend:
             table_size=self.config.table_size_m,
             radius=self.particle_diameter / 2,
             dt=self.config.sim_dt,
-            static_friction=self.config.static_friction,
-            kinetic_friction=self.config.kinetic_friction,
+            static_friction=self.config.table_coefficients[0],
+            kinetic_friction=self.config.table_coefficients[1],
         )
         if len(ids):
             self.cloth.set_particles_vel(velocity[ids], ids.tolist())
+
+    def take_contact_accounting(self, *, reset: bool = False) -> dict[str, Any]:
+        """Explicit cumulative native-counter sample for primitive traces.
+
+        No readback occurs unless called. reset=True returns the previous epoch
+        then starts a new one. Ordinary reset/restore never clears these counters.
+        """
+        self._ensure_open()
+        if self.config.contact_profile != "native_coulomb_v1":
+            return {"schema_version": 1, "profile": "legacy_mg_v1", "available": False}
+        return self.scene.sim.coupler.take_contact_accounting(reset=reset)
 
     def release(self) -> None:
         self._ensure_open()

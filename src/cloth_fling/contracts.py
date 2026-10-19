@@ -28,6 +28,9 @@ class SceneConfig:
     air_resistance: float = 0.0
     image_size: int = 256
     seed: int = 0
+    contact_profile: str = "legacy_mg_v1"
+    table_static_friction: float | None = None
+    table_kinetic_friction: float | None = None
 
     def __post_init__(self) -> None:
         positive = (
@@ -74,9 +77,45 @@ class SceneConfig:
             raise ValueError("max_stretch_solver_iterations must be an integer in [1, 128]")
         if not isinstance(self.table_friction, bool):
             raise ValueError("table_friction must be a boolean")
+        if self.contact_profile not in ("legacy_mg_v1", "native_coulomb_v1"):
+            raise ValueError("unsupported contact_profile")
+        for name in ("table_static_friction", "table_kinetic_friction"):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool) or not math.isfinite(value) or value < 0
+            ):
+                raise ValueError(f"{name} must be finite and nonnegative or None")
+        if (
+            self.contact_profile == "native_coulomb_v1"
+            or self.table_static_friction is not None
+            or self.table_kinetic_friction is not None
+        ) and self.table_coefficients[1] > self.table_coefficients[0]:
+            raise ValueError("table kinetic friction must not exceed static friction")
+
+    @property
+    def table_coefficients(self) -> tuple[float, float]:
+        """Table coefficients, separate from PBD cloth/self-contact coefficients."""
+        defaults = (
+            (0.40, 0.30)
+            if self.contact_profile == "native_coulomb_v1"
+            else (self.static_friction, self.kinetic_friction)
+        )
+        return tuple(
+            default if value is None else value
+            for default, value in zip(
+                defaults, (self.table_static_friction, self.table_kinetic_friction), strict=True
+            )
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        # Keep historical default config/snapshot identities byte-for-byte.
+        if self.contact_profile == "legacy_mg_v1":
+            data.pop("contact_profile")
+        for name in ("table_static_friction", "table_kinetic_friction"):
+            if data[name] is None:
+                data.pop(name)
+        return data
 
 
 @dataclass
