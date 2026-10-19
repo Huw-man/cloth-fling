@@ -108,3 +108,37 @@ GPU tests are opt-in; follow the runtime document for their qualification comman
 Use separate reset families/seeds for development and held-out evaluation. Do not
 split related episode frames across train and test. Training, model release,
 cross-cloth claims, and physical robot adaptation are later milestones.
+
+## Milestone 2 inspection
+
+The [approved milestone 2 gates](docs/milestone2.md) add native-contact qualification,
+whole-cloth clearance, independent matte table appearance, visible debug grasps and
+optional execution videos. CLI simulation commands and `cloth-fling replay` default
+to matte. Use `--legacy-appearance` for old appearance reproduction, or
+`--appearance-config configs/appearance-matte.json` for render-only settings; physics
+still comes exclusively from `--config`. Direct backend callers retain the legacy
+appearance default.
+
+```bash
+# Contact physics must pass before dependent primitive qualification.
+uv run --locked --extra sim cloth-fling diagnose-contact \
+  --config configs/contact-native-v1.json --output runs/contact-native
+
+# Inspect saved data offline; no simulator or video packages needed.
+uv run --locked cloth-fling replay runs/diagnostic-11 --inspect
+
+# Reconstructed saved-trajectory replay (fresh output outside the source).
+uv run --locked --extra sim --extra video cloth-fling replay runs/diagnostic-11 \
+  --output runs/diagnostic-11-replay
+```
+
+Install the optional `video` extra for MP4 encoding. Add `--record-video` to a bounded
+`diagnose` or `collect` command for native captures during execution. Recording errors
+invalidate and preserve the attempt; no action is retried. Video files stay outside
+the dataset manifest under `output/video/`, with relative filenames and hashes in
+reports/evidence. Failed contact gates block dependent qualification; successful
+storage or rendering alone is not a physical or behavior pass. See
+[recording, provenance and replay](docs/dataset.md#milestone-2-evidence-and-recording)
+for interfaces, limitations and comparison rules. Final host GPU evidence belongs to
+the coordinator; broad collection, training, cloud, publication and hardware work
+remain out of scope.

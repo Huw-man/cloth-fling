@@ -240,3 +240,104 @@ An unresolved intent or open episode/run fails verification until closed or reco
 Each new dataset includes an immutable dataset-card template with owner/version,
 distribution, split, qualification, failure/bias, intended-use, and license fields.
 Completing or publishing a dataset card and training a policy are later work.
+
+## Milestone 2 evidence and recording
+
+`collect_episodes` also accepts `record_video=False`, `appearance=None`, and
+`recorder_factory=None`. Without recording, injected executors still receive exactly
+`executor(env, action, config=primitive_config)`. Recording adds the keyword
+`trace_callback`, called synchronously as `callback(env, trace)`; it must not step or
+mutate physics. No video dependency is imported when recording is disabled.
+`appearance` records the settings used to construct `env`; the collection API does
+not change an existing scene's material. CLI simulation commands construct matte
+appearance by default, while `--legacy-appearance` reproduces the old appearance.
+`--appearance-config` accepts independent render-only JSON. SceneConfig physics and
+its hash are unaffected by appearance selection. Direct library/backend callers
+retain legacy appearance with `None`.
+
+```bash
+uv sync --locked --extra sim --extra video --extra dev
+uv run --locked --extra sim --extra video cloth-fling diagnose \
+  --config configs/cloth50.json --reset-dir runs/reset-11 \
+  --primitive-config configs/primitive-default.json --record-video \
+  --output runs/diagnostic-clearance
+uv run --locked --extra sim --extra video cloth-fling collect \
+  --config configs/cloth50.json --reset-dir runs/reset-11 \
+  --episodes 1 --max-actions 2 --record-video --output runs/two-actions
+```
+
+These commands are examples for bounded runs **after** the contact and primitive
+acceptance gates in [milestone 2](milestone2.md) pass. CLI `diagnose` returns nonzero
+for invalid execution; `collect` returns nonzero for invalid actions or reset failures.
+Neither a zero exit status nor a valid dataset is behavior qualification.
+`configs/primitive-legacy.json` explicitly disables clearance for controlled motion
+comparison; `configs/primitive-default.json` enables the approved 20 mm / 100 ms gate,
+50 mm increments and 750 mm cap. A legacy comparison is never clearance qualification.
+
+Recording uses native execution captures labeled `native_render_capture`. Each actual
+global episode/action ID starts a separate recorder under
+`video/episode-<episode_id>-action-<step_id>/`; continuing a dataset uses new IDs.
+Diagnostics use `video/diagnostic-laydown/` and `video/diagnostic-fling/` and require
+fresh recording directories. Each directory contains overhead, oblique and combined
+MP4s plus metadata and a preview. Capture/encoder failures are explicit invalid
+attempts: the collector closes the recorder once, releases, records terminal evidence,
+and ends that episode. It never calls the physical action again because closing a
+file failed. Partial files are preserved. Missing optional encoders fail explicitly.
+Video `complete` means the capture lifecycle completed, independently of motion validity.
+A fully recorded `lift_max_height` or strain failure retains its original reason;
+`action_execution_valid` and `action_reason` accompany separate recording status.
+An encoder failure invalidates an otherwise valid outcome, and preserves an already
+invalid primitive's original reason in the action row and supporting recording evidence.
+Debug captures remain privileged artifacts; original policy RGB/depth stay clean.
+
+Videos are currently **outside the dataset manifest**. Row evidence and the persisted
+`collection-report-<run_id>.json` include relative filenames and SHA-256 hashes under
+`recording`/`recordings`; the manifest does not register the MP4s. External references
+use `relative_file`, avoiding the writer/verifier's reserved `path` + `sha256` pair.
+`dataset verify` checks dataset integrity, not these external files; compare their
+reported hashes separately. Do not move external video metadata into a structured
+`path` + `sha256` reference unless it is registered through the writer.
+
+Configuration provenance stores physics, appearance and primitive settings separately,
+with independent physics/appearance hashes. Source reset content hashes, runtime source
+revision/dirty status, lock hash, seed and detected GPU accompany run evidence. Dataset
+reset metadata remains the authoritative per-episode reset identity. Genesis contact
+accounting in primitive traces is cumulative within its reported epoch; recording does
+not implicitly reset it. Local outputs should live under ignored `runs/`.
+
+## Contact qualification and replay commands
+
+```bash
+uv run --locked --extra sim cloth-fling diagnose-contact \
+  --config configs/contact-native-v1.json --output runs/contact-native
+uv run --locked cloth-fling replay runs/old-dataset --inspect
+uv run --locked --extra sim --extra video cloth-fling replay runs/old-dataset \
+  --output runs/old-dataset-replay --appearance-config configs/appearance-matte.json
+uv run --locked --extra sim --extra video cloth-fling replay runs/old-diagnostic/diagnostic.json \
+  --output runs/old-diagnostic-replay --legacy-appearance
+```
+
+`diagnose-contact` accepts separate physics JSON, `--duration-s` in [0.3, 2] (default
+0.6), and performs the half-timestep comparison by default. A failed physical gate
+returns nonzero and preserves `report.json` and contact artifacts. `--no-half-dt` is
+exploratory only and always returns nonzero with `qualification_passed=false`.
+Unresolved native normal-energy injection blocks primitive qualification. Static and
+kinetic priors 0.40/0.30, and sensitivity profiles, are not measured terry/desk values.
+This command uses the contact agent's scene-local diagnostic; it does not run primitives.
+
+Replay accepts an existing dataset root or diagnostic JSON/directory, including legacy
+saved trajectories. `--episode-id` selects one dataset episode; `--fps` and
+`--max-frames` bound rendered output. `--inspect` validates saved artifacts offline
+without Genesis, Torch or an encoder. Rendering writes a fresh directory outside the
+source and labels output `reconstructed_replay`; it never reexecutes physics. Sparse
+saved meshes use the last sample at or before each frame time, without interpolation;
+missing trajectories are explicitly terminal-only views. `replay-provenance.json`
+records source/video hashes, original-image copies, appearance and runtime identity.
+Replay is inspectability evidence, not a new physical execution or behavior test.
+
+Across changed contact/physics configurations, an old snapshot is **not** a valid exact
+restore fixture. For the coordinator's bounded comparison, derive geometry in the new
+profile, record the parent reset hash, settle once and validate that derived fixture;
+then restore it exactly within that profile for every comparison. Settling under the
+new profile does not establish identical initial states across profiles. This stage
+adds no cross-profile reset import command.

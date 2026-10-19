@@ -81,10 +81,16 @@ sim = [
     { name = "torch" },
     { name = "trimesh" },
 ]
+video = [
+    { name = "imageio" },
+    { name = "imageio-ffmpeg" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "genesis-world", marker = "extra == 'sim'", specifier = "==0.4.3" },
+    { name = "imageio", marker = "extra == 'video'", specifier = ">=2.36,<3" },
+    { name = "imageio-ffmpeg", marker = "extra == 'video'", specifier = ">=0.6,<1" },
     { name = "numpy", specifier = ">=1.26,<3" },
     { name = "pillow", specifier = ">=10,<13" },
     { name = "pyarrow", specifier = ">=18,<24" },
@@ -93,7 +99,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'sim'", specifier = ">=2.7,<3", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "cloth-fling", extra = "sim" } },
     { name = "trimesh", marker = "extra == 'sim'", specifier = ">=4.5,<5" },
 ]
-provides-extras = ["sim", "dev"]
+provides-extras = ["sim", "video", "dev"]
 
 [[package]]
 name = "coacd"
