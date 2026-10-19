@@ -79,7 +79,18 @@ class DatasetWriter:
                 }
             )
             if "DATASET_CARD.md" not in self.manifest["files"]:
-                self._put("DATASET_CARD.md", DATASET_CARD.encode())
+                card = DATASET_CARD.encode()
+                card_path = relative_path(self.root, "DATASET_CARD.md")
+                if card_path.exists():
+                    # Initial creation may have stopped after the card's atomic write.
+                    if card_path.read_bytes() != card:
+                        raise ValueError("unregistered dataset card differs from the template")
+                    self.manifest["files"]["DATASET_CARD.md"] = {
+                        "sha256": sha256(card),
+                        "size_bytes": len(card),
+                    }
+                else:
+                    self._put("DATASET_CARD.md", card)
             self._commit()
         except BaseException:
             self._lock.close()
