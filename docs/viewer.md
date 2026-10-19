@@ -181,3 +181,34 @@ source immutability and provenance. GPU visual review requires the coordinator's
 exclusive lease after the contact gate; CPU tests do not establish native renderer
 or RTX 5080 qualification. Review the actual integrated output before accepting
 appearance and rendering isolation.
+
+### Bounded native qualification (milestone 2)
+
+On the integrated native-contact backend, the exclusive RTX 5080 check passed
+with Genesis 0.4.3 on `cuda:0`. It constructed a flat static scene and **never
+stepped physics or ran a primitive**. Native PBR readback verified roughness .8,
+metallic 0, texture presence and UVs. Both overhead and oblique frames contained
+red and blue marker pixels for selected targets and attached measured vertices;
+both colors disappeared after release. Snapshot hashes, camera transform and
+policy-cache identity were unchanged by every capture. A clean render after all
+debug passes matched the original policy RGB and depth bitwise, and release kept
+velocity exact.
+
+The review montage is `runs/visual-native-v1/native-review.png`; individual frames,
+`qualification.json`, `native-smoke.py`, logs and the three-frame native static
+MP4s are beside it. A phase named `lift` in this static isolation fixture means
+attached-marker display only; no cloth lift or motion was executed. Actual
+marker counts are 1–4 pixels per color at the declared 256 px native resolution
+(the exported video panels are resized to 384 px).
+
+Separate serial GPU checks restored and re-rendered four frames of the original
+milestone1 dataset with legacy appearance and three frames of the original
+diagnostic JSON/NPZ with matte appearance. Both completed with physics stepping
+guarded, explicit reconstructed-replay provenance and intentional truncation.
+The original dataset manifest remained unchanged. Their outputs live in
+`runs/visual-native-v1/old-dataset-legacy-replay/` and
+`runs/visual-native-v1/old-diagnostic-matte-replay/`. These bounded checks establish
+native render/restore compatibility for those fixtures, not primitive behavior or
+full-trajectory replay qualification. The visual lease was released after the
+host compute-process list became empty. User visual acceptance remains a review
+of the saved native frames.
