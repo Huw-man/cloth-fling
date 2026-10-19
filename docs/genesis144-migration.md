@@ -148,3 +148,62 @@ separate gates; none is inherited from the old milestones. The dependency agent 
 GPU scenes, primitive campaigns, collection, training, hardware, cloud or publication.
 Bounded future runtime checks are in [runtime.md](runtime.md); historical behavior and
 failed evidence are preserved in [milestone2-results.md](milestone2-results.md).
+
+
+## Integrated validation result
+
+Coordinator integration completed on 2026-10-19. Local `main` contains the
+runtime/contact, rendering/replay, dependency, CLI and provenance ports. The normal
+root `.venv` uses the new lock. Installation, lint/format, lock consistency and
+113-package dependency compatibility checks passed.
+
+| Gate | Fresh result | Scope |
+| --- | --- | --- |
+| Integrated CPU suite | 323 passed, 8 GPU deselected | Interfaces, state/schema safety, storage and offline imports |
+| Fresh installed offline wheel | 320 passed, 2 optional-dependency skips on integration base; final wheel offline smoke passed | Noneditable package; Genesis, Torch and video extras absent |
+| Native GPU microtest | 1 passed | Native normal response, Coulomb impulses, exclusions, logging/accounting |
+| Contact coupons | All 15 gates passed for each of native/low/high | 24 bounded planar case archives, including half-dt comparisons |
+| Static rendering/archive tests | 5 passed in 23.03 s | Matte PBR, markers, clean policy isolation, depth, schema-2 restore and two historical replays |
+| Full-size GPU scene regressions | 2 passed in 69.39 s | 0.50 m cloth, fold/flat fixtures, calibrated RGB/depth, assisted lift/release and exact restore |
+
+The eight GPU tests ran serially on the RTX 5080; the host compute-process list
+was empty after the final run. Contact default deceleration was 2.945139 m/s²
+versus 2.943 expected, and half-dt stopping distance changed .28036%. Low/high
+profile changes were 1.81838%/.26139%. All energy/work/exclusion gates passed at
+unchanged thresholds. These are engineering-prior contact fixtures, not a
+calibration of a real desk or towel.
+
+Native material readback confirmed roughness .8, metallic 0, and neutral textured
+gray. Selected/attached red and blue spheres were visible in both views and
+absent after release. Clean policy RGB/depth, camera/cache and physics snapshots
+were unchanged by debug capture, including exception cleanup. The static folded
+backface test sampled 115 visible backfaces, with maximum depth error 26.5 µm.
+The full-size nonflat test sampled a maximum below 5 µm, with eroded RGB precision
+and recall both 1.0. Restoring changed geometry did not advance physics.
+
+Old physical snapshots are rejected. Two-frame reconstructions of the original
+milestone-1 dataset and diagnostic passed using compatible recorded geometry,
+with stepping/reset guarded and every source file hash unchanged. These videos
+are reconstructed frames, not new executed episodes or physical continuation.
+Runtime capability properties describe installed mechanisms and do not
+self-certify new configurations; qualification belongs to these explicit reports.
+
+Initial failures are retained: two stale `rigid._rigid_info` test accesses and
+removed `scene._t` assertions were migrated to their public 1.4.4 equivalents.
+No physics, damping, primitive parameters, material coefficients or acceptance
+thresholds were changed to pass. See [contact evidence](contact.md#fresh-genesis-144-contact-evidence-2026-10-19)
+and [native rendering evidence](viewer.md) for scoped results.
+
+Coordinator copies of all evidence are in ignored `runs/genesis144/`:
+`summary.json` with content hashes, `contact-qualification/`,
+`render-qualification/`, `full-scene-tests.log` and its saved state,
+`integrated-cpu-static-tests.log`, `offline-wheel-validation/`,
+`final-wheel-smoke.json`, `dist/`, and `root-doctor-host.json`.
+Historical milestone artifacts remain unchanged.
+
+The runtime migration is complete. Dynamic fling, full-clearance laydown,
+diverse-bunch reset generation, repeated-action episodes and policy quality are
+not qualified by this migration. The next behavior stage must generate fresh
+1.4.4 fixtures and re-establish favorable-grasp primitive behavior before any
+collection or learning. No unfolding primitive, episode collection, training,
+publication, cloud or hardware execution ran during this migration.

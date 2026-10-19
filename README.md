@@ -10,7 +10,8 @@ Version 0.2.0 pins **Genesis 1.4.4**, the latest stable release checked on 2026-
 and starts a new engine/snapshot compatibility boundary. See the
 [migration record](docs/genesis144-migration.md) for upstream identity, wheel hash,
 locked versions and validation limits. Historical Genesis 0.4.3 results do not qualify
-this runtime. Cloth-motion campaigns and collection remain paused during migration.
+this runtime. The runtime migration passed its bounded checks; cloth-motion
+campaigns and collection await fresh primitive qualification.
 
 Use Python 3.11 or 3.12 and [uv](https://docs.astral.sh/uv/). Run from the repository root:
 
@@ -47,14 +48,19 @@ leased, bounded upgraded-runtime probe.
 ## Migration gates
 
 New CLI scenes use the upgraded `native_coulomb_v2` profile and
-`configs/contact-native-v2.json` after the runtime/contact integration is applied.
+`configs/contact-native-v2.json`.
+Integrated validation: **323 CPU tests and eight GPU tests passed**, plus all three
+contact coupon profiles. The [migration record](docs/genesis144-migration.md#integrated-validation-result)
+separates contact, rendering, state restoration and behavior scope.
+
 The v1 contact profiles remain archival Genesis 0.4.3 configurations. Do not use an
 old contact pass or old snapshot as qualification under Genesis 1.4.4.
 
 The upgraded legacy PBD coupling still omits tangential cloth/rigid friction; rigid
 contact improvements in upstream release notes do not establish cloth-contact fidelity.
-The guarded v2 extension needs new contact qualification before any dependent primitive
-campaign. Do not relax materials, damping or acceptance gates to obtain a pass.
+The guarded v2 extension passed the three bounded native/low/high contact profiles.
+Its material values remain engineering priors. Do not relax materials, damping or
+acceptance gates to obtain a pass.
 Dependencies and CPU interface checks precede coordinator-assigned, exclusive RTX 5080
 probes. There is no GPU lease implied by installation or by these example commands.
 
