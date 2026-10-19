@@ -1,4 +1,4 @@
-"""Two-action restored-fixture comparison, never an automatic quality qualification."""
+"""Bounded restored-fixture diagnostics, never an automatic quality qualification."""
 
 from __future__ import annotations
 
@@ -15,8 +15,103 @@ import numpy as np
 
 from cloth_fling.contracts import ClothBackend, GraspAction
 from cloth_fling.provenance import config_provenance, execute_recorded, runtime_provenance
-from cloth_fling.selection import select_action
+from cloth_fling.selection import feasible_candidates, pixels_to_world, select_action
+from cloth_fling.sim.mesh import pixel_ray, ray_surface_hit, resolve_grasps
 from cloth_fling.sim.primitives import PrimitiveConfig, execute_action
+
+
+def reviewed_pair_candidates(
+    env: ClothBackend,
+    *,
+    max_pairs: int = 8,
+    candidate_budget: int = 256,
+) -> list[dict[str, Any]]:
+    """Privileged diagnostic ranking for human RGB review; never execute a pair.
+
+    Rerank the bounded widest conservative RGB boundary candidates by material
+    rest chord. Resolve with the *same* first-hit, visible-vertex snapping and
+    feasibility checks as the backend, not nearest hidden particles. This is not
+    a learned policy, a global search, or a guarantee of unfolding behavior.
+    """
+    if any(type(v) is not int or v < 1 for v in (max_pairs, candidate_budget)):
+        raise ValueError("max_pairs and candidate_budget must be positive integers")
+    if tuple(env.attached_ids):
+        raise ValueError("reviewed_pair_requires_unattached_fixture")
+    observation = env.observe()
+    positions = np.asarray(env.get_positions(), dtype=float)
+    rest, faces = getattr(env, "rest_positions", None), getattr(env, "faces", None)
+    if rest is None or faces is None:
+        metadata = env.snapshot()
+        rest, faces = metadata.get("rest_positions", rest), metadata.get("faces", faces)
+    if rest is None or faces is None:
+        raise ValueError("reviewed_pair_requires_rest_positions_and_faces")
+    rest, faces = np.asarray(rest, dtype=float), np.asarray(faces)
+    if (
+        positions.ndim != 2
+        or positions.shape[1] != 3
+        or len(positions) < 2
+        or rest.shape != positions.shape
+        or not np.isfinite([positions, rest]).all()
+        or faces.ndim != 2
+        or faces.shape[1] != 3
+        or not np.issubdtype(faces.dtype, np.integer)
+        or not len(faces)
+        or np.any(faces < 0)
+        or np.any(faces >= len(positions))
+    ):
+        raise ValueError("invalid_reviewed_pair_geometry")
+    config = env.config
+    candidates = feasible_candidates(observation, config, max_pairs=candidate_budget)
+    rows = []
+    for action in candidates:
+        try:
+            ids = resolve_grasps(
+                action.pixels,
+                positions,
+                faces,
+                observation.calibration,
+                radius=config.mesh_spacing_m * 1.5,
+                workspace=config.grasp_workspace_m,
+                min_separation=config.min_grasp_separation_m,
+                max_separation=config.max_grasp_separation_m,
+            )
+        except ValueError:
+            # A rendered boundary can disagree with a ray hit. Never replace it
+            # with a hidden particle or relax the canonical resolver's bounds.
+            continue
+        hits = np.array(
+            [
+                ray_surface_hit(*pixel_ray(pixel, observation.calibration), positions, faces)[0]
+                for pixel in action.pixels
+            ]
+        )
+        surface = pixels_to_world(observation, np.asarray(action.pixels))
+        rows.append(
+            {
+                "pixels": [list(pixel) for pixel in action.pixels],
+                "predicted_grasp_particle_ids": list(ids),
+                "snap_distances_m": np.linalg.norm(positions[list(ids)] - hits, axis=1).tolist(),
+                "visible_span_m": float(np.linalg.norm(surface[1] - surface[0])),
+                "resolved_span_m": float(np.linalg.norm(positions[ids[1]] - positions[ids[0]])),
+                "rest_flat_chord_m": float(np.linalg.norm(rest[ids[1]] - rest[ids[0]])),
+                "observation_id": observation.observation_id,
+                "policy": "reviewed_pair_privileged_rest_geometry",
+                "requires_visual_review": True,
+                "candidate_budget": candidate_budget,
+                "candidate_pairs_considered": len(candidates),
+            }
+        )
+    rows.sort(key=lambda r: (-r["rest_flat_chord_m"], -r["visible_span_m"], r["pixels"]))
+    selected, seen = [], set()
+    for row in rows:
+        key = tuple(sorted(row["predicted_grasp_particle_ids"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(row)
+        if len(selected) == max_pairs:
+            break
+    return selected
 
 
 def _fingerprint(env):
@@ -106,20 +201,33 @@ def run_diagnostic(
     output_dir=None,
     primitive_config: PrimitiveConfig | None = None,
     action: GraspAction | None = None,
+    primitives: tuple[str, ...] = ("laydown", "fling"),
     record_video=False,
     appearance=None,
     recorder_factory=None,
 ) -> dict[str, Any]:
-    """Compare one laydown and one fling from the *current* saved fixture.
+    """Run the requested primitives from the *current* saved fixture.
 
     No reset or broad campaign. Select once before any motion. Restore and verify positions,
     velocities, attachments, clock and coverage exactly before each action and on exit.
     A restoration mismatch stops comparison and is explicitly invalid, never a new fixture.
     """
+    if isinstance(primitives, str):
+        raise ValueError("primitives must be a nonempty sequence of distinct laydown/fling names")
+    try:
+        primitives = tuple(primitives)
+    except TypeError as exc:
+        raise ValueError("primitives must be a sequence of laydown/fling names") from exc
+    if (
+        not primitives
+        or any(not isinstance(p, str) or p not in {"laydown", "fling"} for p in primitives)
+        or len(set(primitives)) != len(primitives)
+    ):
+        raise ValueError("primitives must be a nonempty sequence of distinct laydown/fling names")
     if record_video and output_dir is None:
         raise ValueError("record_video requires output_dir")
     if record_video:
-        for primitive in ("laydown", "fling"):
+        for primitive in primitives:
             if (Path(output_dir) / "video" / f"diagnostic-{primitive}").exists():
                 raise FileExistsError("diagnostic video output exists; choose a fresh directory")
     started = time.monotonic()
@@ -131,6 +239,7 @@ def run_diagnostic(
         "provenance": config_provenance(env, appearance=appearance, primitive_config=c),
         "recordings": [],
         "seed": seed,
+        "primitives": list(primitives),
         "config": asdict(c),
         "runs": [],
         "errors": [],
@@ -145,7 +254,11 @@ def run_diagnostic(
             "coverage",
         ],
         "pair_selection": "geometry_guided_privileged_depth; RGB boundary candidates",
-        "comparison": "one laydown baseline / one retained-grasp fling candidate",
+        "comparison": (
+            "one laydown baseline / one retained-grasp fling candidate"
+            if len(primitives) == 2
+            else f"one {primitives[0]} execution; no paired comparison"
+        ),
         "quality_qualified": False,
         "behavior_passed": None,
         "evidence_scope": "backend execution diagnostic; no GPU or behavior qualification implied",
@@ -169,7 +282,7 @@ def run_diagnostic(
                 env.observe(),
                 env.config,
                 policy="geometry_guided",
-                primitive="laydown",
+                primitive=primitives[0],
                 rng=np.random.default_rng(seed),
             )
         else:
@@ -179,8 +292,8 @@ def run_diagnostic(
             report["fixture_artifacts"] = _save_fixture(directory, fixture)
         report["fixed_pixels"] = action.pixels
         report["fixture_sha256"] = fingerprint
-        for primitive in ("laydown", "fling"):
-            if time.monotonic() - started >= 2 * c.max_wall_seconds:
+        for primitive in primitives:
+            if time.monotonic() - started >= len(primitives) * c.max_wall_seconds:
                 raise TimeoutError("diagnostic_wall_deadline")
             env.restore(copy.deepcopy(fixture))
             matched = _fingerprint(env) == fingerprint
@@ -213,6 +326,7 @@ def run_diagnostic(
                     "artifacts": artifacts,
                     "primitive": primitive,
                     "pixels": outcome.action.pixels,
+                    "grasp_particle_ids": outcome.evidence.get("grasp_particle_ids", []),
                     "execution_valid": outcome.execution_valid,
                     "reason": outcome.reason,
                     "coverage_before": outcome.coverage_before,
@@ -227,8 +341,9 @@ def run_diagnostic(
                 }
             )
         report["execution_valid"] = all(r["execution_valid"] for r in report["runs"])
-        if report["execution_valid"]:
-            baseline, candidate = report["runs"]
+        if report["execution_valid"] and len(primitives) == 2:
+            by_name = {r["primitive"]: r for r in report["runs"]}
+            baseline, candidate = by_name["laydown"], by_name["fling"]
             report["candidate_minus_baseline_final_coverage"] = (
                 candidate["coverage_after"] - baseline["coverage_after"]
             )

@@ -138,6 +138,53 @@ def _capture_contact_accounting(env, trace):
         ) from exc
 
 
+def _phase_contact_deltas(traces):
+    """Difference cumulative reads at phase boundaries, never reset backend counters.
+
+    A boundary trace belongs to the phase it starts, at the previous phase's final
+    physics time. The last interval ends at the last captured sample, which may
+    precede a failed action's terminal state; expose that endpoint explicitly.
+    """
+    starts = [i for i, t in enumerate(traces) if i == 0 or t["phase"] != traces[i - 1]["phase"]]
+    result = []
+    for n, index in enumerate(starts):
+        boundary = n + 1 < len(starts)
+        first = traces[index]
+        last = traces[starts[n + 1]] if boundary else traces[-1]
+        a, b = (t.get("table_contact_accounting", {}) for t in (first, last))
+        identity = ("schema_version", "profile", "engine_version", "epoch")
+        available = (
+            bool(a.get("totals"))
+            and a.get("available", True)
+            and b.get("available", True)
+            and all(k in a and k in b and a[k] == b[k] for k in identity)
+            and a["epoch"] is not None
+            and a.get("totals", {}).keys() == b.get("totals", {}).keys()
+            and b.get("substeps", -1) >= a.get("substeps", 0)
+        )
+        result.append(
+            {
+                "phase": first["phase"],
+                "start_simulated_seconds": first["simulated_seconds"],
+                "end_simulated_seconds": last["simulated_seconds"],
+                "ends_at_next_phase_boundary": boundary,
+                "available": bool(available),
+                "unavailable_reason": None
+                if available
+                else "missing_or_incompatible_cumulative_accounting",
+                "profile": a.get("profile"),
+                "epoch": a.get("epoch"),
+                "substeps": b["substeps"] - a["substeps"]
+                if available and "substeps" in a and "substeps" in b
+                else None,
+                "totals_delta": {k: b["totals"][k] - v for k, v in a["totals"].items()}
+                if available
+                else None,
+            }
+        )
+    return result
+
+
 @dataclass(frozen=True)
 class _RestGeometry:
     positions: np.ndarray
@@ -308,6 +355,8 @@ class _Execution:
         self.settled = False
         self.release_coverage = None
         self.peak_settle_coverage = None
+        self.motion_by_phase: dict[str, dict[str, Any]] = {}
+        self.motion_references: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         diameter = float(getattr(env, "particle_diameter", env.config.mesh_spacing_m))
         if not math.isfinite(diameter) or diameter <= 0:
             raise PrimitiveFailure("invalid_particle_diameter")
@@ -384,12 +433,34 @@ class _Execution:
         if self.geometry is not None:
             strain = float(np.max(_edge_strain(self.geometry, p)[0]))
             self.max_strain = max(self.max_strain or 0, strain)
-            if strain > self.c.max_strain + 1e-6:
-                raise PrimitiveFailure("cloth_strain_limit")
+        strain_failed = strain is not None and strain > self.c.max_strain + 1e-6
         now = float(self.env.simulated_time) - self.sim_started
+        free = np.ones(len(p), dtype=bool)
+        free[list(self.ids)] = False
+        airborne = p[:, 2] - self.particle_radius - self.c.table_height_m >= self.c.clearance_m
+        attachment_error = (
+            float(np.linalg.norm(p[list(self.ids)] - self.target, axis=1).max())
+            if self.ids and self.target is not None
+            else None
+        )
+        motion = {
+            "cloth_centroid_m": p.mean(axis=0).tolist(),
+            "cloth_horizontal_extent_m": np.ptp(p[:, :2], axis=0).tolist(),
+            "attachment_error_max_m": attachment_error,
+            "free_particle_count": int(free.sum()),
+            "free_cloth_rms_speed_m_s": float(np.sqrt(np.mean(speed[free] ** 2)))
+            if free.any()
+            else None,
+            "cloth_airborne_fraction_proxy": float(airborne.mean()),
+            "free_cloth_airborne_fraction_proxy": float(airborne[free].mean())
+            if free.any()
+            else None,
+        }
+        self.measure_motion(phase, now, p, motion, strain, clearance)
         if (
             force
             or premature_contact
+            or strain_failed
             or now - self.last_trace >= self.c.trace_interval_seconds - 1e-9
         ):
             coverage, area, _ = _coverage(self.env)
@@ -409,6 +480,7 @@ class _Execution:
                 if self.grasp_ids
                 else [],
                 "attachment_ids": list(self.env.attached_ids),
+                "grasp_particle_ids": list(self.grasp_ids),
                 "cloth_positions_m": p.copy(),
                 "cloth_velocities_m_s": v.copy(),
                 "coverage": coverage,
@@ -419,6 +491,7 @@ class _Execution:
                 "table_proximity_fraction_proxy": float(np.mean(near_table)),
                 "min_surface_clearance_m": clearance,
                 "near_table_surface_fraction_proxy": near_surface,
+                **motion,
             }
             _capture_contact_accounting(self.env, trace)
             self.check()
@@ -434,9 +507,51 @@ class _Execution:
                         f"trace_callback_failed_{type(exc).__name__}: {exc}"
                     ) from exc
                 self.check()
+        if strain_failed:
+            raise PrimitiveFailure("cloth_strain_limit")
         if premature_contact:
             raise PrimitiveFailure("premature_table_contact")
         return p, v
+
+    def measure_motion(self, phase, now, p, motion, strain, clearance):
+        """Every-tick cloth evidence; repeated forced samples add no path distance."""
+        if phase not in self.motion_by_phase:
+            self.motion_references[phase] = (p.copy(), p.copy())
+            self.motion_by_phase[phase] = {
+                "start_simulated_seconds": now,
+                "cloth_mean_particle_path_m": 0.0,
+                "max_edge_strain_proxy": None,
+                "max_attachment_error_m": None,
+                "max_free_cloth_rms_speed_m_s": None,
+                "min_free_cloth_airborne_fraction_proxy": None,
+                "max_free_cloth_airborne_fraction_proxy": None,
+                "min_surface_clearance_m": clearance,
+            }
+        d = self.motion_by_phase[phase]
+        first, previous = self.motion_references[phase]
+        d["end_simulated_seconds"] = now
+        d["cloth_mean_particle_path_m"] += float(np.linalg.norm(p - previous, axis=1).mean())
+        d["cloth_rms_displacement_m"] = float(np.sqrt(np.mean(np.sum((p - first) ** 2, axis=1))))
+        d["cloth_centroid_displacement_m"] = (p.mean(axis=0) - first.mean(axis=0)).tolist()
+        d["min_surface_clearance_m"] = min(d["min_surface_clearance_m"], clearance)
+        for key, value, reducer in (
+            ("max_edge_strain_proxy", strain, max),
+            ("max_attachment_error_m", motion["attachment_error_max_m"], max),
+            ("max_free_cloth_rms_speed_m_s", motion["free_cloth_rms_speed_m_s"], max),
+            (
+                "min_free_cloth_airborne_fraction_proxy",
+                motion["free_cloth_airborne_fraction_proxy"],
+                min,
+            ),
+            (
+                "max_free_cloth_airborne_fraction_proxy",
+                motion["free_cloth_airborne_fraction_proxy"],
+                max,
+            ),
+        ):
+            if value is not None:
+                d[key] = value if d[key] is None else reducer(d[key], value)
+        self.motion_references[phase] = (first, p.copy())
 
     def phase(self, name):
         if not self.phases or self.phases[-1] != name:
@@ -849,6 +964,9 @@ def execute_action(
         "max_cloth_speed_m_s": run.max_speed if run else None,
         "max_command_speed_m_s": run.command_speed if run else None,
         "max_command_acceleration_m_s2": run.command_acceleration if run else None,
+        "phase_motion": run.motion_by_phase if run else {},
+        "phase_contact": _phase_contact_deltas(run.trace) if run else [],
+        "settled_coverage": final if run and run.settled and final_observation_valid else None,
         "coverage_at_release": run.release_coverage if run else None,
         "release_velocity_delta_max_m_s": run.release_velocity_delta if run else None,
         "coverage_recoil_after_release": (
@@ -864,6 +982,10 @@ def execute_action(
             "tauten": "flat-rest chord target; graph path sag proxy; no force sensor",
             "strain_prediction": "edge extension/rate extrapolation over braking horizon; not stress",
             "missing_rest": "endpoint span fallback; no material strain guarantee",
+            "airborne": "particle surface >= configured clearance; geometric proxy, not native contact",
+            "cloth_centroid": "arithmetic particle centroid; not a mass-weighted centre of mass",
+            "phase_motion": "every numeric sample; measured cloth, not commanded hand motion",
+            "phase_contact": "cumulative native accounting differences over recorded boundary times",
         },
     }
     return ActionOutcome(
@@ -885,6 +1007,8 @@ def execute_action(
         evidence={
             "phases": run.phases if run else [],
             "phase_traces": run.trace if run else [],
+            "grasp_particle_ids": list(run.grasp_ids) if run else [],
+            "grasp_pixels": action.pixels,
             "terminal_state": {"positions_m": p.tolist(), "velocities_m_s": v.tolist()}
             if final_observation_valid
             else None,
