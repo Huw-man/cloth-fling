@@ -261,3 +261,16 @@ def test_recorder_callback_provenance_dimensions_clearance_and_release(tmp_path)
     assert metadata["videos"][-1]["dimensions"] == [768, 384]
     assert all(v["sha256"] and v["physics_config_sha256"] for v in metadata["videos"])
     assert len(metadata["physics_configs"]) == 1
+
+
+def test_callback_encoder_failure_is_explicit_in_metadata_even_if_owner_catches(tmp_path):
+    class BrokenEncoder(Encoder):
+        def append_data(self, frame):
+            raise RuntimeError("encoder failure")
+
+    with VideoRecorder(tmp_path, writer_factory=BrokenEncoder) as recorder:
+        with pytest.raises(RuntimeError, match="encoder failure"):
+            recorder(Env(), {"phase": "lift", "simulated_seconds": 0.0, "coverage": 0.4})
+    metadata = recorder.metadata()
+    assert not metadata["complete"]
+    assert metadata["failure"] == "RuntimeError: encoder failure"
