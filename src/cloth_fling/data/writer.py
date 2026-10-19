@@ -7,6 +7,7 @@ import fcntl
 import io
 import math
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -188,6 +189,7 @@ class DatasetWriter:
         reset_kind="drop",
         reset_error=None,
         reset_evidence=None,
+        episode_metadata=None,
     ):
         """Commit a new episode even if it will have zero actions; return integer ID."""
         with self._transaction():
@@ -196,6 +198,9 @@ class DatasetWriter:
             if any(e["status"] == "open" for e in self.manifest["episodes"]):
                 raise RuntimeError("finish the current episode before resetting")
             config = jsonable(config)
+            if episode_metadata is not None and not isinstance(episode_metadata, Mapping):
+                raise TypeError("episode_metadata must be a mapping")
+            episode_metadata = jsonable(copy.deepcopy(dict(episode_metadata or {})))
             config_hash = sha256(json_bytes(config))
             cloth_id = cloth_id or self.metadata.get("cloth_id", "cloth-default")
             family_hash = reset_family_hash(
@@ -223,6 +228,7 @@ class DatasetWriter:
                     "reset_source": reset_source,
                     "reset_kind": reset_kind,
                     "cloth_id": cloth_id,
+                    "episode_metadata": episode_metadata,
                 },
                 "reset",
             )
@@ -261,6 +267,7 @@ class DatasetWriter:
                 "end_reason": None,
                 "final_state": None,
                 "reset_error": reset_error,
+                "metadata": episode_metadata,
             }
             if reset_error:
                 episode.update(
@@ -288,6 +295,10 @@ class DatasetWriter:
         reset_source=None,
         evidence=None,
         reset_kind="drop",
+        split=None,
+        reset_group_id=None,
+        cloth_id=None,
+        episode_metadata=None,
     ):
         """Persist failed preparation as a zero-step episode, never an action transition."""
         return self.write_episode_reset(
@@ -299,7 +310,21 @@ class DatasetWriter:
             reset_kind=reset_kind,
             reset_error=reason,
             reset_evidence=evidence,
+            split=split,
+            reset_group_id=reset_group_id,
+            cloth_id=cloth_id,
+            episode_metadata=episode_metadata,
         )
+
+    def write_collection_summary(self, episode_id, summary):
+        """Attach immutable collector accounting to a closed episode, without new rows."""
+        with self._transaction():
+            episode = self._episode(episode_id)
+            if episode["status"] != "closed" or self.manifest["in_flight"]:
+                raise RuntimeError("collection summary requires a closed episode")
+            if "collection_summary" in episode:
+                raise RuntimeError("collection summary is immutable")
+            episode["collection_summary"] = self._bundle(summary, "collection-summary")
 
     def begin_attempt(self, episode_id, action, *, before=None):
         """Durably journal intent BEFORE calling the executor. Never replay an intent."""

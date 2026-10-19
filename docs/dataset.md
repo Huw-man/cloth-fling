@@ -39,8 +39,92 @@ report = collect_episodes(
     policy="uniform_valid", primitive="laydown", primitive_config=None,
     selector=None, executor=None, max_wall_seconds=600,
     reset_state=None, reset_kind="drop",
+    split=None, reset_group_id=None, cloth_id=None, episode_metadata=None,
+    settled_coverage_threshold=None,
 )
 ```
+
+### Milestone 3 episode identity and stopping
+
+The optional `split`, `reset_group_id`, and `cloth_id` arguments apply to each episode,
+including failed resets and zero-action episodes. Omitted values retain the writer's
+existing defaults and reset-family derivation. Use distinct split-isolated reset groups;
+an explicit renamed group does not bypass the verifier's saved-input/family leakage check.
+One call uses the same metadata for every episode. Benchmark orchestration can call once
+per case when cases need different metadata or recording choices.
+
+`episode_metadata` accepts a mapping of safe support values. Collection deep-copies it
+before any backend calls and the writer copies it independently for each episode. It is
+stored in `manifest.episodes[*].metadata` and the checksummed reset support's
+`episode_metadata`, separately from authoritative split/reset/cloth/config identities.
+It cannot override those identities. The offline verifier compares these metadata copies.
+As elsewhere in supporting evidence, a nested `path` + `sha256` pair denotes a registered
+dataset artifact reference; use `relative_file` for external artifacts.
+
+`settled_coverage_threshold=None` preserves the existing action-count behavior. With a
+threshold in `(0, 1]`, collection ends after a valid action whose diagnostics explicitly
+report `settled=True`, whose terminal observation is present and has a new observation
+ID, and whose finite normalized coverage reaches the threshold. The row is retained with
+`terminated=True`, `truncated=False`, and `end_reason="settled_coverage_threshold"`.
+Invalid execution, environment termination and exhausted wall budgets retain their own
+end reasons. Negative gains and every failed attempt remain in the existing schema.
+The selector receives the exact prior result's observation object for its next call;
+collection never steps, restores, or resets between actions in an episode.
+
+A successful generated reset supplies settlement through the backend reset contract.
+Collection also checks the saved velocities have RMS speed below 0.01 m/s and no known
+attachments. A restored fixture additionally requires the explicit caller assertion
+`episode_metadata={"initial_settled": True, ...}`. This assertion is only appropriate for
+a fresh independently qualified settled fixture; restoring geometry alone does not
+qualify it. The coordinator checks restoration fingerprints. These checks are read-only:
+collection adds no settling steps or holding interval. Unknown settlement stays unknown.
+If this confirmed initial coverage already reaches the threshold, the reset and final
+snapshot are saved, with zero transitions and `end_reason="initially_unfolded"`.
+
+For the bounded milestone 3 benchmark, orchestration uses `max_actions=5`,
+`settled_coverage_threshold=0.95`, and about `max_wall_seconds=650` for a whole collection
+call. The frozen primitive configuration still enforces its unchanged 30 simulated-second
+and 120 wall-second **per-action** guards. The collector does not change primitive,
+settling, clearance, strain, numerical, physics, mesh, material or appearance settings.
+Simulator execution remains coordinator-owned and requires an exclusive GPU lease.
+
+Each report's `episode_reports` entry is also saved as an immutable, checksummed support
+bundle referenced by `manifest.episodes[*].collection_summary`. Important fields are:
+
+- `initial_coverage`, `initial_confirmed_settled_coverage`, `initial_observation_id`,
+  `initial_rms_speed_m_s`, and `initial_settlement_source`;
+- `last_confirmed_settled_coverage`, `last_confirmed_settled_observation_id`, and
+  `last_confirmed_settlement_source` (initial reset or latest valid settled action);
+- `last_observed_coverage`, `last_observation_id`, and `last_observed_execution_valid`,
+  which retain terminal invalid geometry separately from the last confirmed settlement;
+- explicit identities, caller metadata, attempts/valid/invalid counts, and `lifecycle`
+  (`initially_unfolded`, `unfolded_after_action`, or `stopped_without_threshold`).
+
+Coverage is null when unavailable, including uncertain execution exceptions. An invalid
+outcome cannot update confirmed settlement even if its geometry exceeds 0.95 or its
+diagnostics report settling. The verifier checks summary counts, identities, metadata,
+observation IDs, initial certification/velocity evidence, last confirmed settlement against
+valid fresh settled rows, terminal observed coverage, and threshold closure consistency.
+Historical episodes without these optional fields remain readable. Interrupted collection
+may lack a summary; existing durable-intent recovery still closes it without replay.
+
+`timings.by_recording.recorded` and `.unrecorded` separately report attempt count,
+selection/execution seconds and known simulated seconds. Execution time includes native
+capture and recorder finalization when enabled, and excludes dataset writes, snapshots
+and collector cleanup. `timings.storage_seconds` measures explicit writer transactions;
+whole-call `wall_seconds` includes setup, snapshots, cleanup and persistence before report
+serialization. Timing fields are not an additive partition. Partial simulated duration
+is unknown for exceptions, rather than invented. `storage` reports registered file count,
+registered bytes total/added, and external recording file count/bytes/stat errors;
+manifest/report/lock bytes are excluded from registered-byte totals.
+
+The coordinator records every diagnostic action and the first paired pilot case in each
+split using the existing `record_video=True` native recorder with grasp spheres. Remaining
+throughput cases use `record_video=False`; compare only the unrecorded timing bucket for
+unrecorded throughput. Video artifacts and hashes retain the lifecycle and external-file
+semantics described below. CPU fake tests prove the two-episode/two-action selection and
+storage chain only; simulator continuity and primitive behavior require fresh integrated
+host evidence and are not inferred from those tests.
 
 `env` implements `cloth_fling.contracts.ClothBackend`. Default dependencies are imported
 only when collection is called:
