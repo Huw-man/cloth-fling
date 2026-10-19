@@ -15,7 +15,7 @@ from cloth_fling.selection import (
     SelectionConfig, NoValidPairError, feasible_candidates, select_action,
 )
 from cloth_fling.sim.primitives import PrimitiveConfig, execute_action
-from cloth_fling.diagnostics import run_diagnostic
+from cloth_fling.diagnostics import reviewed_pair_candidates, run_diagnostic
 
 # SceneConfig is the normal selection configuration; SelectionConfig exposes search budgets.
 action = select_action(
@@ -27,6 +27,8 @@ outcome = execute_action(env, action, config=PrimitiveConfig())
 report = run_diagnostic(
     env, seed=0, output_dir=output_dir, primitive_config=PrimitiveConfig(), action=None,
 )
+# One restored-fixture laydown attempt, without running the frozen fling:
+report = run_diagnostic(env, primitives=("laydown",), action=action)
 ```
 
 Exact signatures:
@@ -34,7 +36,17 @@ Exact signatures:
 - `select_action(observation: Observation, config: SceneConfig | SelectionConfig, *, policy: str = 'uniform_valid', primitive: str = 'laydown', rng: numpy.random.Generator | None = None) -> GraspAction`
 - `feasible_candidates(observation: Observation, config: SceneConfig | SelectionConfig, *, primitive: str = 'laydown', max_pairs: int = 256) -> list[GraspAction]`
 - `execute_action(env: ClothBackend, action: GraspAction, config: PrimitiveConfig | None = None, *, trace_callback=None) -> ActionOutcome`
-- `run_diagnostic(env: ClothBackend, *, seed: int = 0, output_dir=None, primitive_config: PrimitiveConfig | None = None, action: GraspAction | None = None) -> dict`
+- `run_diagnostic(env: ClothBackend, *, seed=0, output_dir=None, primitive_config=None, action=None, primitives=("laydown", "fling"), record_video=False, appearance=None, recorder_factory=None) -> dict`
+- `reviewed_pair_candidates(env: ClothBackend, *, max_pairs=8, candidate_budget=256) -> list[dict]`
+
+`primitives` must be a nonempty sequence of distinct supported names. The default
+remains one laydown and one fling; `("laydown",)` executes exactly one action.
+Validation precedes backend access. Each requested action restores the identical
+saved fixture and uses the same fixed pixels. The report names the requested
+primitives and preserves exact resolved `grasp_particle_ids` for each run. Final
+coverage comparison is emitted only when both named runs are valid, with fling
+minus laydown sign independent of requested order. A single run has no paired
+comparison. Only requested video directories participate in collision checks.
 
 `execute_action` never resets/restores. Valid actions can follow one another on the
 evolving cloth. It captures pre-action RGB/depth observation and actual backend
@@ -102,6 +114,66 @@ of this eroded mask. This reduces silhouette/ray disagreement but cannot correct
 stale or mismatched rendered cloth geometry. Stage 0/coordinator should compare
 the rendered mask with ray-hit cloth pixels during GPU qualification; the CPU
 gray-table fixture is not that check.
+
+For privileged diagnostic review, `reviewed_pair_candidates` reranks the existing
+bounded conservative RGB boundary candidates by descending **rest-flat chord**,
+then visible span and deterministic pixel ties. It deduplicates unordered resolved
+vertex pairs. `candidate_budget` bounds the pool returned by `feasible_candidates`
+(default 256 widest visible pairs); this does not search every visible/material
+pair or guarantee a best grasp. Existing selection policies remain unchanged.
+
+Every candidate passes the backend's canonical `resolve_grasps`: first-hit triangle,
+visible-vertex ray checks, 1.5 mesh-spacing snap radius, distinct IDs, workspace and
+resolved separation bounds. A ray/snap disagreement rejects the candidate; there
+is no nearest-hidden-vertex fallback. Each JSON-safe row exposes `pixels`,
+`predicted_grasp_particle_ids`, `snap_distances_m` (ray-hit to resolved vertex),
+`visible_span_m` (unprojected depth), `resolved_span_m`, `rest_flat_chord_m`,
+`observation_id` and the declared candidate budget/count. Missing rest geometry
+fails explicitly. The helper observes only: no attachment, step, reset or restore.
+The coordinator must review the pair on the frozen RGB image before execution.
+Actual execution attachment IDs remain decisive. Rest geometry/ranking is never
+a learned RGB observation or behavior qualification.
+
+## Measured motion evidence
+
+`execute_action` retains its trace callback and original cadence. Each trace now
+also reports arithmetic `cloth_centroid_m`, horizontal extent, attachment error
+against commanded targets while attached, retained `grasp_particle_ids` after
+release, free-particle count/speed and whole/free-cloth airborne fractions.
+Airborne means particle surface clearance at least `config.clearance_m`; it is a
+geometric proxy, separate from native contact accounting. The centroid uses equal
+particle weights. Full measured cloth positions/velocities remain available;
+commanded hand targets alone do not establish cloth motion or unfolding.
+
+`diagnostics.phase_motion` aggregates measured cloth on **every numeric sample**,
+including physics steps omitted by trace cadence. For clearance, swing, pullback,
+lowering (`lower`), placement (`place`; laydown uses `diagonal_laydown`/`drag`),
+release and settling (`settle`), it records exact phase measurement times,
+whole-cloth RMS displacement from phase entry, arithmetic centroid displacement,
+mean accumulated particle travel, peak edge strain, peak attachment error,
+peak free-cloth RMS speed, free-cloth airborne fraction range and minimum surface
+clearance. These are measurements, not new acceptance thresholds. A strain guard
+failure now forces a failing-tick trace before raising, even with decimated traces.
+
+`diagnostics.phase_contact` differences the existing complete cumulative native
+payloads from a phase's first trace to the next phase boundary, without resetting
+counters. The final interval ends at the last captured trace; on failure this may
+precede the terminal state. Each interval exposes both timestamps and whether it
+ends at a new phase boundary. Deltas require matching accounting schema, engine,
+profile and epoch, matching total columns and nondecreasing substep counters.
+Missing or incompatible payloads are explicitly unavailable, never zero contact.
+Signed friction/normal work and integer counters retain their original types.
+The raw cumulative payloads remain unchanged for independent auditing.
+
+`settled_coverage` is populated only after successful settling and a valid terminal
+observation. Existing release/settle-peak coverage recoil measurements and negative
+coverage gains remain intact. CPU fakes validate evidence and lifecycle only;
+fresh Genesis 1.4.4/native-v2 execution must establish primitive behavior anew.
+
+The Milestone 3 bounded simulator checks belong to the coordinator's exclusive GPU
+lease after integration. No trajectory revision is authorized until measured
+failure and approval of a concrete measured target. The reference 12 cm laydown,
+existing named 30 cm laydown and frozen fling motion/physics/limits are unchanged.
 
 `uniform_valid` samples distinct foreground pixel pairs uniformly by rejection
 with at most 4096 attempts, then checks depth, separation and workspace.

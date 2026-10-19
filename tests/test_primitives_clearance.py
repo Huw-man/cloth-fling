@@ -315,12 +315,22 @@ def test_strain_violation_during_clearance_aborts_without_relaxing_guard(clearan
             env.positions[12, 0] += 0.1
 
     env.step = overstrain
-    c = replace(clearance_config, lift_height_m=0.05, lift_seconds=0.5, max_strain=0.3)
+    c = replace(
+        clearance_config,
+        lift_height_m=0.05,
+        lift_seconds=0.5,
+        max_strain=0.3,
+        trace_interval_seconds=30,
+    )
     result = execute_action(env, selected(env), c, trace_callback=phase_observer)
     assert not result.execution_valid and result.reason == "cloth_strain_limit"
     assert result.diagnostics["clearance"]["failure_reason"] == "cloth_strain_limit"
     assert "diagonal_laydown" not in result.evidence["phases"]
     assert env.release_calls == 1 and not env.attached_ids
+    failing = result.evidence["phase_traces"][-1]
+    assert failing["phase"] == "clearance"
+    assert failing["max_edge_strain_proxy"] > c.max_strain
+    np.testing.assert_array_equal(failing["cloth_positions_m"], env.positions)
 
 
 def test_callback_receives_measured_traces_and_same_backend(clearance_config):
