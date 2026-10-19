@@ -6,7 +6,7 @@ import heapq
 import math
 import time
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -44,9 +44,16 @@ class PrimitiveConfig:
     max_simulated_seconds: float = 30.0
     max_wall_seconds: float = 120.0
     trace_interval_seconds: float = 0.05
+    clearance_enabled: bool = True
+    clearance_increment_m: float = 0.05
+    clearance_max_height_m: float = 0.75
+    clearance_m: float = 0.020
+    clearance_hold_seconds: float = 0.1
 
     def __post_init__(self):
         values = asdict(self)
+        if not isinstance(values.pop("clearance_enabled"), bool):
+            raise ValueError("clearance_enabled must be a boolean")
         if not all(math.isfinite(v) for v in values.values()):
             raise ValueError("primitive config must be finite")
         nonnegative = {
@@ -72,6 +79,14 @@ class PrimitiveConfig:
             and 0 < self.taut_rest_ratio <= 1
         ):
             raise ValueError("primitive config exceeds action/settle/release bounds")
+        if not (
+            self.clearance_increment_m <= 0.05
+            and self.clearance_max_height_m <= 0.75
+            and self.clearance_m >= 0.020
+            and self.clearance_hold_seconds >= 0.1
+            and (not self.clearance_enabled or self.lift_height_m <= self.clearance_max_height_m)
+        ):
+            raise ValueError("primitive config exceeds whole-cloth clearance bounds")
 
 
 class PrimitiveFailure(RuntimeError):
@@ -235,7 +250,7 @@ def _trajectory(points, durations, speed, acceleration):
 
 
 class _Execution:
-    def __init__(self, env, config, started, sim_started):
+    def __init__(self, env, config, started, sim_started, trace_callback=None):
         self.env, self.c, self.started, self.sim_started = (
             env,
             config,
@@ -243,6 +258,9 @@ class _Execution:
             sim_started,
         )
         self.dt = float(env.config.sim_dt)
+        if trace_callback is not None and not callable(trace_callback):
+            raise PrimitiveFailure("invalid_trace_callback")
+        self.trace_callback = trace_callback
         if not math.isfinite(self.dt) or self.dt <= 0:
             raise PrimitiveFailure("invalid_sim_dt")
         self.ids: tuple[int, ...] = ()
@@ -256,6 +274,7 @@ class _Execution:
         self.rest_flat_chord = None
         self.tauten_diagnostics: dict[str, Any] = {}
         self.target = None
+        self.selected_grasp_positions = None
         self.last_trace = -math.inf
         self.max_strain = None
         self.max_speed = 0.0
@@ -265,6 +284,60 @@ class _Execution:
         self.settled = False
         self.release_coverage = None
         self.peak_settle_coverage = None
+        diameter = float(getattr(env, "particle_diameter", env.config.mesh_spacing_m))
+        if not math.isfinite(diameter) or diameter <= 0:
+            raise PrimitiveFailure("invalid_particle_diameter")
+        self.particle_radius = diameter / 2
+        self.clearance_mode = None
+        self.clearance_hold_started = None
+        self.clearance_diagnostics: dict[str, Any] = {
+            "enabled": config.clearance_enabled,
+            "particle_radius_m": self.particle_radius,
+            "required_min_clearance_m": config.clearance_m,
+            "required_hold_seconds": config.clearance_hold_seconds,
+            "gate_passed": False if config.clearance_enabled else None,
+            "measured_min_clearance_m": None,
+            "latest_min_clearance_m": None,
+            "near_table_fraction": None,
+            "achieved_height_m": None,
+            "hold_seconds": 0.0,
+            "hold_min_clearance_m": None,
+            "protected_min_clearance_m": None,
+            "failure_reason": None,
+        }
+
+    def measure_clearance(self, p, phase):
+        """Geometry evidence every physics tick, independent of trace decimation.
+
+        Particle centres minus radius define the cloth surface. This is a
+        conservative geometric guard, not a native contact measurement.
+        """
+        surface = p[:, 2] - self.particle_radius - self.c.table_height_m
+        minimum = float(surface.min())
+        near = float(np.mean(surface <= 0.01))
+        d = self.clearance_diagnostics
+        d["latest_min_clearance_m"], d["near_table_fraction"] = minimum, near
+        guarded = self.clearance_mode == "protected" and phase in {"swing", "pullback"}
+        if self.clearance_mode == "acquire" or guarded:
+            previous = d["measured_min_clearance_m"]
+            d["measured_min_clearance_m"] = minimum if previous is None else min(previous, minimum)
+        if self.clearance_mode == "acquire":
+            height = float(p[list(self.ids), 2].min() - self.c.table_height_m)
+            d["achieved_height_m"] = max(d["achieved_height_m"] or height, height)
+            now = float(self.env.simulated_time)
+            if minimum >= self.c.clearance_m:
+                if self.clearance_hold_started is None:
+                    self.clearance_hold_started = now
+                    d["hold_min_clearance_m"] = minimum
+                d["hold_seconds"] = now - self.clearance_hold_started
+                d["hold_min_clearance_m"] = min(d["hold_min_clearance_m"], minimum)
+            else:
+                self.clearance_hold_started = None
+                d["hold_seconds"], d["hold_min_clearance_m"] = 0.0, None
+        if guarded:
+            previous = d["protected_min_clearance_m"]
+            d["protected_min_clearance_m"] = minimum if previous is None else min(previous, minimum)
+        return minimum, near, guarded and minimum < self.c.clearance_m
 
     def check(self, *, step=False):
         elapsed = float(self.env.simulated_time) - self.sim_started
@@ -278,6 +351,7 @@ class _Execution:
     def sample(self, phase, *, force=False):
         self.check()
         p, v = _state(self.env)
+        clearance, near_surface, premature_contact = self.measure_clearance(p, phase)
         if self.ids and tuple(self.env.attached_ids) != self.ids:
             raise PrimitiveFailure("attachment_lost_or_changed")
         speed = np.linalg.norm(v, axis=1)
@@ -289,7 +363,11 @@ class _Execution:
             if strain > self.c.max_strain + 1e-6:
                 raise PrimitiveFailure("cloth_strain_limit")
         now = float(self.env.simulated_time) - self.sim_started
-        if force or now - self.last_trace >= self.c.trace_interval_seconds - 1e-9:
+        if (
+            force
+            or premature_contact
+            or now - self.last_trace >= self.c.trace_interval_seconds - 1e-9
+        ):
             coverage, area, _ = _coverage(self.env)
             if phase == "settle":
                 self.peak_settle_coverage = max(self.peak_settle_coverage or coverage, coverage)
@@ -301,6 +379,9 @@ class _Execution:
                     "commanded_grasp_positions_m": None
                     if self.target is None
                     else self.target.tolist(),
+                    "selected_grasp_positions_m": None
+                    if self.selected_grasp_positions is None
+                    else self.selected_grasp_positions.tolist(),
                     "measured_grasp_positions_m": p[list(self.grasp_ids)].tolist()
                     if self.grasp_ids
                     else [],
@@ -313,13 +394,28 @@ class _Execution:
                     "rms_speed_m_s": float(np.sqrt(np.mean(speed**2))),
                     "max_speed_m_s": float(speed.max()),
                     "table_proximity_fraction_proxy": float(np.mean(near_table)),
+                    "min_surface_clearance_m": clearance,
+                    "near_table_surface_fraction_proxy": near_surface,
                 }
             )
             self.last_trace = now
+            if self.trace_callback is not None:
+                try:
+                    self.trace_callback(self.env, self.trace[-1])
+                except TimeoutError:
+                    raise
+                except Exception as exc:
+                    raise PrimitiveFailure(
+                        f"trace_callback_failed_{type(exc).__name__}: {exc}"
+                    ) from exc
+                self.check()
+        if premature_contact:
+            raise PrimitiveFailure("premature_table_contact")
         return p, v
 
     def phase(self, name):
-        self.phases.append(name)
+        if not self.phases or self.phases[-1] != name:
+            self.phases.append(name)
         self.sample(name, force=True)
 
     def step(self, phase, target=None):
@@ -332,6 +428,10 @@ class _Execution:
                 or np.any(target[:, 2] < self.c.table_height_m)
             ):
                 raise PrimitiveFailure("attachment_target_outside_workspace")
+            if self.c.clearance_enabled and np.any(
+                target[:, 2] > self.c.table_height_m + self.c.clearance_max_height_m + 1e-9
+            ):
+                raise PrimitiveFailure("lift_max_height")
             velocity = (target - self.target) / self.dt
             acceleration = (velocity - self.previous_command_velocity) / self.dt
             speed = float(np.linalg.norm(velocity, axis=1).max())
@@ -474,6 +574,35 @@ class _Execution:
         self.tauten_diagnostics["final_span_m"] = span
         self.sample("tauten", force=True)
 
+    def clear_cloth(self):
+        if not self.c.clearance_enabled:
+            return
+        self.clearance_mode = "acquire"
+        self.phase("clearance")
+        d = self.clearance_diagnostics
+        while True:
+            if d["latest_min_clearance_m"] >= self.c.clearance_m:
+                if d["hold_seconds"] + 1e-9 >= self.c.clearance_hold_seconds:
+                    d["gate_passed"] = True
+                    self.sample("clearance", force=True)
+                    self.clearance_mode = "protected"
+                    return
+                self.step("clearance", self.target)
+                continue
+            height = float(self.target[:, 2].max() - self.c.table_height_m)
+            if height >= self.c.clearance_max_height_m - 1e-9:
+                raise PrimitiveFailure("lift_max_height")
+            increment = min(self.c.clearance_increment_m, self.c.clearance_max_height_m - height)
+            raised = self.target.copy()
+            raised[:, 2] += increment
+            # Reuse the analytically bounded smooth trajectory and per-tick
+            # kinematic/strain/deadline checks. Only attached particles move.
+            self.follow(
+                [self.target.copy(), raised],
+                [self.c.lift_seconds * increment / self.c.lift_height_m],
+                ["clearance"],
+            )
+
     def settle(self):
         self.phase("settle")
         start = float(self.env.simulated_time)
@@ -492,7 +621,11 @@ class _Execution:
 
 
 def execute_action(
-    env: ClothBackend, action: GraspAction, config: PrimitiveConfig | None = None
+    env: ClothBackend,
+    action: GraspAction,
+    config: PrimitiveConfig | None = None,
+    *,
+    trace_callback: Callable[[ClothBackend, dict[str, Any]], None] | None = None,
 ) -> ActionOutcome:
     """Execute without reset. Failures return invalid outcomes with terminal observation/evidence.
 
@@ -500,6 +633,9 @@ def execute_action(
     Cleanup still releases attachment. TimeoutError propagates to collector/supervisor owners.
     Missing terminal observations return after=None on an invalid outcome.
     Deadlines are cooperative around each backend operation.
+    trace_callback(env, trace) observes each captured trace after numeric measurement;
+    it must not step or mutate physics. Callback errors invalidate and release,
+    while external TimeoutError propagates after cleanup.
     """
     c = config or PrimitiveConfig()
     started, sim_started = time.monotonic(), float(env.simulated_time)
@@ -513,7 +649,7 @@ def execute_action(
     try:
         before = env.observe()
         coverage_before = _coverage(env)
-        run = _Execution(env, c, started, sim_started)
+        run = _Execution(env, c, started, sim_started, trace_callback)
         run.check()
         if action.primitive not in {"laydown", "fling"}:
             raise PrimitiveFailure("unknown_primitive")
@@ -537,6 +673,8 @@ def execute_action(
             or np.any(np.abs(xyz[:, :2]) > env.config.grasp_workspace_m / 2)
         ):
             raise PrimitiveFailure("infeasible_action_geometry")
+        run.selected_grasp_positions = xyz.copy()
+        run.sample("selected", force=True)
         run.geometry = _rest_geometry(env, len(p))
         ids = tuple(env.attach(action.pixels))
         if (
@@ -564,6 +702,7 @@ def execute_action(
             raise PrimitiveFailure("grasp_above_lift_height")
         run.follow([run.target.copy(), lifted], [c.lift_seconds], ["lift"])
         run.tauten()
+        run.clear_cloth()
         start = run.target.copy()
         axis = start[1] - start[0]
         direction = np.array([-axis[1], axis[0], 0.0])
@@ -663,6 +802,8 @@ def execute_action(
             errors.append({"type": type(exc).__name__, "message": str(exc), "stage": "deadline"})
             truncated |= isinstance(exc, DeadlineExceeded)
     final = coverage_after[0]
+    if run and c.clearance_enabled and not valid:
+        run.clearance_diagnostics["failure_reason"] = reason
     diagnostics = {
         "coverage_gain": final - coverage_before[0],
         "settled": bool(run and run.settled),
@@ -676,6 +817,7 @@ def execute_action(
         "graph_geodesic_distance": run.rest_distance if run else None,
         "rest_flat_chord_m": run.rest_flat_chord if run else None,
         "tauten": run.tauten_diagnostics if run else {},
+        "clearance": run.clearance_diagnostics if run else {},
         "strain_bound_available": bool(run and run.geometry is not None),
         "max_edge_strain_proxy": run.max_strain if run else None,
         "max_cloth_speed_m_s": run.max_speed if run else None,
@@ -692,6 +834,7 @@ def execute_action(
         "proxy_labels": {
             "max_edge_strain_proxy": "mesh edge extension/rest length minus one; not stress",
             "table_proximity_fraction_proxy": "z <= table+0.01m; not native contact",
+            "near_table_surface_fraction_proxy": "z-radius <= table+0.01m; not native contact",
             "tauten": "flat-rest chord target; graph path sag proxy; no force sensor",
             "strain_prediction": "edge extension/rate extrapolation over braking horizon; not stress",
             "missing_rest": "endpoint span fallback; no material strain guarantee",
