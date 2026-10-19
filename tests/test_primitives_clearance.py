@@ -1,5 +1,7 @@
 """Clearance lifecycle guards with CPU fakes; no native physics qualification."""
 
+import copy
+import json
 from dataclasses import replace
 
 import numpy as np
@@ -346,3 +348,128 @@ def test_callback_error_releases_and_timeout_propagates(clearance_config, extern
         assert result.reason == "trace_callback_failed_RuntimeError: recorder failed"
         assert result.after is not None
     assert env.release_calls == 1 and not env.attached_ids and env.reset_calls == 0
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_contact_accounting_once_per_trace_complete_unchanged_and_noninterfering(
+    clearance_config, native
+):
+    env = HangingClothFake()
+    baseline = HangingClothFake()
+    calls, callbacks = [], []
+    payload = {"schema_version": 1, "profile": "native_coulomb_v1" if native else "legacy"}
+    if not native:
+        payload["available"] = False
+
+    def accounting(*, reset=False):
+        assert reset is False
+        if native:
+            payload.update(
+                epoch=17,
+                substeps=2**40 + env.step_calls,
+                totals={
+                    "normal_impulse_kg_m_s": float(2**40) + 0.25,
+                    "tangential_impulse_kg_m_s": env.step_calls * 0.125,
+                },
+            )
+        calls.append(copy.deepcopy(payload))
+        return payload  # Reused mutable object must not overwrite earlier evidence.
+
+    def recorder(backend, trace):
+        assert backend is env
+        assert len(calls) == len(callbacks) + 1
+        assert trace["table_contact_accounting"] == calls[-1]
+        callbacks.append(trace["table_contact_accounting"])
+
+    env.take_contact_accounting = accounting
+    c = replace(clearance_config, trace_interval_seconds=0.4)
+    result = execute_action(env, selected(env), c, trace_callback=recorder)
+    reference = execute_action(baseline, selected(baseline), c)
+    assert result.execution_valid and reference.execution_valid
+    traces = result.evidence["phase_traces"]
+    assert len(calls) == len(callbacks) == len(traces) < env.step_calls
+    assert callbacks == calls
+    json.dumps(callbacks, allow_nan=False)
+    if native:
+        assert callbacks[0]["epoch"] == callbacks[-1]["epoch"] == 17
+        assert callbacks[0]["substeps"] == 2**40
+        assert callbacks[-1]["substeps"] == 2**40 + env.step_calls
+        assert callbacks[0]["totals"]["normal_impulse_kg_m_s"] == float(2**40) + 0.25
+    else:
+        assert all(
+            t == {"schema_version": 1, "profile": "legacy", "available": False} for t in calls
+        )
+    payload["profile"] = "mutated_after_capture"
+    assert all(t["profile"] != payload["profile"] for t in callbacks)
+    # Optional measurement must not change commands, cloth state or existing evidence.
+    np.testing.assert_equal(env.commands, baseline.commands)
+    np.testing.assert_array_equal(env.positions, baseline.positions)
+    np.testing.assert_array_equal(env.velocities, baseline.velocities)
+    without_contact = [
+        {k: v for k, v in t.items() if k != "table_contact_accounting"} for t in traces
+    ]
+    np.testing.assert_equal(without_contact, reference.evidence["phase_traces"])
+    assert env.simulated_time == baseline.simulated_time
+    assert env.reset_calls == 0 and env.release_calls == 1
+
+
+def test_absent_contact_accounting_omits_field_and_records_config_version(clearance_config):
+    env = HangingClothFake()
+    result = execute_action(env, selected(env), clearance_config)
+    assert result.execution_valid, result.reason
+    assert all("table_contact_accounting" not in t for t in result.evidence["phase_traces"])
+    assert result.evidence["primitive_config_version"] == "milestone2_clearance_v1"
+    assert result.evidence["config"]["clearance_enabled"] is True
+
+
+@pytest.mark.parametrize("external_timeout", [False, True])
+def test_contact_accounting_error_fails_capture_and_releases(clearance_config, external_timeout):
+    env = HangingClothFake()
+    calls, recorded = [], []
+    error = (
+        TimeoutError("accounting cancelled")
+        if external_timeout
+        else RuntimeError("nonfinite counters")
+    )
+
+    def accounting(*, reset=False):
+        assert reset is False
+        calls.append(env.simulated_time)
+        if env.simulated_time > 0.05:
+            raise error
+        return {
+            "schema_version": 1,
+            "profile": "native_coulomb_v1",
+            "epoch": 1,
+            "substeps": 0,
+            "totals": {},
+        }
+
+    env.take_contact_accounting = accounting
+    if external_timeout:
+        with pytest.raises(TimeoutError) as caught:
+            execute_action(
+                env, selected(env), clearance_config, trace_callback=lambda e, t: recorded.append(t)
+            )
+        assert caught.value is error
+    else:
+        result = execute_action(
+            env, selected(env), clearance_config, trace_callback=lambda e, t: recorded.append(t)
+        )
+        assert not result.execution_valid
+        assert result.reason == "contact_accounting_capture_failed_RuntimeError: nonfinite counters"
+        assert result.after is not None
+        assert len(result.evidence["phase_traces"]) == len(recorded)
+    assert len(calls) == len(recorded) + 1  # Failing read never becomes a captured trace.
+    assert env.release_calls == 1 and not env.attached_ids and env.reset_calls == 0
+
+
+@pytest.mark.parametrize("payload", [None, {"totals": {"impulse": float("nan")}}])
+def test_malformed_contact_accounting_does_not_silently_omit_evidence(clearance_config, payload):
+    env = HangingClothFake()
+    env.take_contact_accounting = lambda *, reset=False: payload
+    result = execute_action(env, selected(env), clearance_config)
+    assert not result.execution_valid
+    assert result.reason.startswith("contact_accounting_capture_failed_ValueError:")
+    assert result.evidence["phase_traces"] == [] and env.step_calls == 0
+    assert env.release_calls == 1 and env.reset_calls == 0

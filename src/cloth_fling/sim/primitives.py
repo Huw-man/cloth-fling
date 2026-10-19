@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import heapq
+import json
 import math
 import time
 from dataclasses import asdict, dataclass
@@ -12,6 +13,8 @@ import numpy as np
 
 from cloth_fling.contracts import ActionOutcome, ClothBackend, GraspAction
 from cloth_fling.selection import foreground_mask, pixels_to_world
+
+PRIMITIVE_CONFIG_VERSION = "milestone2_clearance_v1"
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,27 @@ def _coverage(env):
     if len(result) != 3 or not np.isfinite(result).all() or result[2] <= 0:
         raise PrimitiveFailure("invalid_coverage")
     return result
+
+
+def _capture_contact_accounting(env, trace):
+    """Read optional cumulative evidence once, without resetting or deriving deltas."""
+    try:
+        missing = object()
+        take = getattr(env, "take_contact_accounting", missing)
+        if take is missing:
+            return
+        accounting = take(reset=False)
+        if not isinstance(accounting, dict):
+            raise ValueError("contact accounting must be a JSON object")
+        # Freeze the complete backend payload, preserving Python integers and
+        # float64 values rather than narrowing/summing native per-particle counters.
+        trace["table_contact_accounting"] = json.loads(json.dumps(accounting, allow_nan=False))
+    except TimeoutError:
+        raise
+    except Exception as exc:
+        raise PrimitiveFailure(
+            f"contact_accounting_capture_failed_{type(exc).__name__}: {exc}"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -372,32 +396,33 @@ class _Execution:
             if phase == "settle":
                 self.peak_settle_coverage = max(self.peak_settle_coverage or coverage, coverage)
             near_table = p[:, 2] <= self.c.table_height_m + 0.01
-            self.trace.append(
-                {
-                    "phase": phase,
-                    "simulated_seconds": now,
-                    "commanded_grasp_positions_m": None
-                    if self.target is None
-                    else self.target.tolist(),
-                    "selected_grasp_positions_m": None
-                    if self.selected_grasp_positions is None
-                    else self.selected_grasp_positions.tolist(),
-                    "measured_grasp_positions_m": p[list(self.grasp_ids)].tolist()
-                    if self.grasp_ids
-                    else [],
-                    "attachment_ids": list(self.env.attached_ids),
-                    "cloth_positions_m": p.copy(),
-                    "cloth_velocities_m_s": v.copy(),
-                    "coverage": coverage,
-                    "area_m2": area,
-                    "max_edge_strain_proxy": strain,
-                    "rms_speed_m_s": float(np.sqrt(np.mean(speed**2))),
-                    "max_speed_m_s": float(speed.max()),
-                    "table_proximity_fraction_proxy": float(np.mean(near_table)),
-                    "min_surface_clearance_m": clearance,
-                    "near_table_surface_fraction_proxy": near_surface,
-                }
-            )
+            trace = {
+                "phase": phase,
+                "simulated_seconds": now,
+                "commanded_grasp_positions_m": None
+                if self.target is None
+                else self.target.tolist(),
+                "selected_grasp_positions_m": None
+                if self.selected_grasp_positions is None
+                else self.selected_grasp_positions.tolist(),
+                "measured_grasp_positions_m": p[list(self.grasp_ids)].tolist()
+                if self.grasp_ids
+                else [],
+                "attachment_ids": list(self.env.attached_ids),
+                "cloth_positions_m": p.copy(),
+                "cloth_velocities_m_s": v.copy(),
+                "coverage": coverage,
+                "area_m2": area,
+                "max_edge_strain_proxy": strain,
+                "rms_speed_m_s": float(np.sqrt(np.mean(speed**2))),
+                "max_speed_m_s": float(speed.max()),
+                "table_proximity_fraction_proxy": float(np.mean(near_table)),
+                "min_surface_clearance_m": clearance,
+                "near_table_surface_fraction_proxy": near_surface,
+            }
+            _capture_contact_accounting(self.env, trace)
+            self.check()
+            self.trace.append(trace)
             self.last_trace = now
             if self.trace_callback is not None:
                 try:
@@ -863,6 +888,7 @@ def execute_action(
             if final_observation_valid
             else None,
             "config": asdict(c),
+            "primitive_config_version": PRIMITIVE_CONFIG_VERSION,
             "trace_interval_seconds": c.trace_interval_seconds,
             "source_adaptation": "FlingBot c5f35c785c6bc5d49282fb10117aa66ca04bf144",
         },

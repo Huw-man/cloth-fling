@@ -279,6 +279,26 @@ edge strain, speed, attachment state and deadlines are checked every physics ste
 Each trace also records `min_surface_clearance_m` and
 `near_table_surface_fraction_proxy` (fraction with surface <=table+0.01 m), retaining
 the historical centre-based `table_proximity_fraction_proxy` separately.
+
+When the backend exposes the optional duck-typed method
+`take_contact_accounting(*, reset=False)`, each captured trace calls it exactly once
+with `reset=False` and stores the complete JSON object in
+`table_contact_accounting` before invoking the trace callback. There are no reads
+between captures and no implicit counter resets, rebasing or physics writes.
+Native evidence retains `schema_version`, `profile`, cumulative integer `epoch`
+and `substeps`, and the `totals` dictionary of Python floats from the backend's
+float64 counters. Values are copied without summing or narrowing counters. A legacy
+`available=False` object is retained unchanged; an absent method omits the field.
+Read/serialization failures invalidate capture explicitly with
+`contact_accounting_capture_failed_<type>: <message>` and run release cleanup.
+External `TimeoutError` still propagates. Nonfinite or non-object payloads cannot
+silently become missing contact evidence. This optional evidence is independent
+of the geometric clearance guard and is never learned RGB input.
+
+The full primitive config remains in `evidence['config']`, with
+`evidence['primitive_config_version']='milestone2_clearance_v1'` identifying this
+clearance-enabled config schema (including explicit legacy-disabled comparisons).
+
 `diagnostics['clearance']` records:
 
 - `enabled`, radius, required clearance/hold, and `gate_passed` (`null` in legacy mode).
