@@ -1,0 +1,17 @@
+{
+  "cloth_size_m": 0.5,
+  "mesh_spacing_m": 0.01,
+  "areal_density_kg_m2": 0.3,
+  "sim_dt": 0.002,
+  "table_size_m": 1.2,
+  "grasp_workspace_m": 0.9,
+  "min_grasp_separation_m": 0.08,
+  "max_grasp_separation_m": 0.55,
+  "stretch_compliance": 1e-7,
+  "bending_compliance": 1e-5,
+  "static_friction": 0.15,
+  "kinetic_friction": 0.15,
+  "air_resistance": 0.0,
+  "image_size": 256,
+  "seed": 0
+}
