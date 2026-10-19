@@ -298,6 +298,33 @@ def test_interrupt_between_actions_closes_metadata_without_fabricating_action(tm
     assert report["attempts"] == 1
 
 
+def test_interrupt_before_first_manifest_reconciles_exact_orphan_card(tmp_path, monkeypatch):
+    def fail_commit(self):
+        raise OSError("interrupted before first manifest")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(DatasetWriter, "_commit", fail_commit)
+        with pytest.raises(OSError, match="before first manifest"):
+            DatasetWriter(tmp_path)
+    assert not (tmp_path / "manifest.json").exists()
+    card = (tmp_path / "DATASET_CARD.md").read_bytes()
+    with DatasetWriter(tmp_path):
+        pass
+    assert (tmp_path / "DATASET_CARD.md").read_bytes() == card
+    report = verify_dataset(tmp_path)
+    assert report["valid"], report
+    assert report["orphan_files"] == [] and report["attempts"] == 0
+
+
+def test_unrecognized_orphan_card_is_preserved_and_rejected(tmp_path):
+    card = tmp_path / "DATASET_CARD.md"
+    card.write_bytes(b"unrecognized existing card")
+    with pytest.raises(ValueError, match="unregistered dataset card"):
+        DatasetWriter(tmp_path)
+    assert card.read_bytes() == b"unrecognized existing card"
+    assert not (tmp_path / "manifest.json").exists()
+
+
 def test_interrupt_after_manifest_replacement_does_not_duplicate_committed_row(
     tmp_path, monkeypatch
 ):

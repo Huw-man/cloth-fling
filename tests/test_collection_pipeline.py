@@ -162,6 +162,53 @@ def test_execution_exception_records_terminal_observation_and_cleanup(tmp_path):
     assert verify_dataset(tmp_path)["valid"]
 
 
+@pytest.mark.parametrize("cleanup_capture_available", [False, True])
+def test_failed_terminal_capture_never_relabels_before_as_after(
+    tmp_path, cleanup_capture_available
+):
+    env = FakeEnv()
+
+    def executor(env, action, *, config):
+        result = execute(env, action, config=config)
+        if not cleanup_capture_available:
+
+            def unavailable():
+                raise RuntimeError("terminal camera unavailable")
+
+            env.observe = unavailable
+        return replace(
+            result,
+            execution_valid=False,
+            reason="terminal_capture_failed",
+            after=result.before,
+            coverage_after=float("nan"),
+            area_after_m2=float("nan"),
+            diagnostics={"terminal_observation_valid": False},
+        )
+
+    report = collect_episodes(env, tmp_path, selector=select, executor=executor)
+    assert report["attempts"] == report["invalid"] == 1
+    row = read_transitions(tmp_path).to_pylist()[0]
+    assert row["reward"] is None
+    if cleanup_capture_available:
+        assert row["after_observation_id"] == "1"
+        assert row["after_rgb_path"] != row["before_rgb_path"]
+        assert row["after_support_path"] != row["before_support_path"]
+    else:
+        for key in (
+            "after_observation_id",
+            "after_rgb_path",
+            "after_rgb_sha256",
+            "after_support_path",
+            "after_support_sha256",
+        ):
+            assert row[key] is None
+        evidence = read_support(tmp_path, row["evidence_path"])
+        assert "camera unavailable" in evidence["cleanup"]["observe_error"]
+    verified = verify_dataset(tmp_path)
+    assert verified["valid"], verified
+
+
 def test_cleanup_error_is_evidence(tmp_path):
     env = FakeEnv()
 

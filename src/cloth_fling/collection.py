@@ -299,7 +299,10 @@ def collect_episodes(
                     cleanup_evidence = None
                     if not outcome.execution_valid:
                         after, final_state, cleanup_evidence = cleanup()
-                        if after is not None:
+                        if (
+                            after is not None
+                            or outcome.diagnostics.get("terminal_observation_valid") is False
+                        ):
                             outcome = replace(outcome, after=after)
                     else:
                         final_state = snapshot()
