@@ -194,9 +194,13 @@ physics step through swing and pullback**, regardless of trace cadence. A single
 insufficient-clearance tick returns `premature_table_contact`, captures that failing
 tick, and runs the existing release cleanup. This is a conservative geometric
 guard, not evidence of native contact. Intentional descent may cross the threshold
-once the `lower` phase starts. Laydown begins intentional descent immediately after
+once the `lower` phase starts. With clearance enabled, both the swing and pullback
+waypoints retain the achieved lift height; the shared trajectory tangents keep
+their commanded z constant. Descent occurs exclusively during `lower` and `place`.
+Laydown begins intentional descent immediately after
 the gate. `clearance_enabled=False` retains the legacy phase order for measured
-comparisons and is recorded in config/evidence; it makes no clearance guarantee.
+comparisons, including the original `min(0.04, lift_height_m / 4)` pullback height
+drop, and is recorded in config/evidence; it makes no clearance guarantee.
 
 Laydown moves diagonally down/forward and continues into a short near-table drag.
 The fling candidate retains attachment throughout one continuous swing, pullback,
@@ -296,8 +300,10 @@ silently become missing contact evidence. This optional evidence is independent
 of the geometric clearance guard and is never learned RGB input.
 
 The full primitive config remains in `evidence['config']`, with
-`evidence['primitive_config_version']='milestone2_clearance_v1'` identifying this
-clearance-enabled config schema (including explicit legacy-disabled comparisons).
+`evidence['primitive_config_version']='milestone2_clearance_v2'` identifies the
+enabled full-height swing/pullback semantics. Version v1 deliberately lowered the
+pullback waypoint before `lower`; v2 removes that inconsistency while preserving
+the exact legacy-disabled waypoints and all clearance guards.
 
 `diagnostics['clearance']` records:
 

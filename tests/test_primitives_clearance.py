@@ -222,6 +222,53 @@ def test_fling_clearance_protection_ends_at_intended_lower(clearance_config):
     assert env.release_calls == 1 and env.reset_calls == 0
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_pullback_height_v2_and_exact_legacy_waypoint_heights(
+    clearance_config, monkeypatch, enabled
+):
+    from cloth_fling.sim.primitives import _Execution
+
+    env = HangingClothFake(hanging_length=0.34)
+    plans = []
+    follow = _Execution.follow
+
+    def capture_plan(run, points, durations, phases):
+        if phases == ["swing", "pullback", "lower", "place"]:
+            plans.append(np.asarray(points).copy())
+        return follow(run, points, durations, phases)
+
+    monkeypatch.setattr(_Execution, "follow", capture_plan)
+    c = replace(clearance_config, clearance_enabled=enabled)
+    result = execute_action(env, selected(env, "fling"), c, trace_callback=phase_observer)
+    assert result.execution_valid, result.reason
+    assert len(plans) == 1
+    z = plans[0][:, :, 2]
+    if enabled:
+        assert z[0, 0] == pytest.approx(0.40)
+        expected = [z[0, 0], z[0, 0], z[0, 0], 0.075, 0.020]
+    else:
+        expected = [0.30, 0.30, 0.26, 0.075, 0.020]
+    np.testing.assert_array_equal(z, np.broadcast_to(np.array(expected)[:, None], z.shape))
+    if enabled:
+        # Check actual dense physics-step commands, not just the waypoint endpoints.
+        protected = [
+            p[list(env.release_records[0][1]), 2]
+            for phase, _, p in env.physics_history
+            if phase in {"swing", "pullback"}
+        ]
+        lower = [
+            p[list(env.release_records[0][1]), 2]
+            for phase, _, p in env.physics_history
+            if phase == "lower"
+        ]
+        assert protected and lower
+        np.testing.assert_allclose(protected, 0.40, rtol=0, atol=1e-12)
+        assert np.min(lower) < 0.10
+        assert result.diagnostics["clearance"]["protected_min_clearance_m"] >= c.clearance_m
+    assert result.evidence["primitive_config_version"] == "milestone2_clearance_v2"
+    assert env.release_calls == 1 and not env.attached_ids and env.reset_calls == 0
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -418,7 +465,7 @@ def test_absent_contact_accounting_omits_field_and_records_config_version(cleara
     result = execute_action(env, selected(env), clearance_config)
     assert result.execution_valid, result.reason
     assert all("table_contact_accounting" not in t for t in result.evidence["phase_traces"])
-    assert result.evidence["primitive_config_version"] == "milestone2_clearance_v1"
+    assert result.evidence["primitive_config_version"] == "milestone2_clearance_v2"
     assert result.evidence["config"]["clearance_enabled"] is True
 
 

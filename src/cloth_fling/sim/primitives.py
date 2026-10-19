@@ -14,7 +14,7 @@ import numpy as np
 from cloth_fling.contracts import ActionOutcome, ClothBackend, GraspAction
 from cloth_fling.selection import foreground_mask, pixels_to_world
 
-PRIMITIVE_CONFIG_VERSION = "milestone2_clearance_v1"
+PRIMITIVE_CONFIG_VERSION = "milestone2_clearance_v2"
 
 
 @dataclass(frozen=True)
@@ -746,7 +746,8 @@ def execute_action(
         else:
             swung = start + direction * c.swing_distance_m
             pulled = start - direction * c.pullback_distance_m
-            pulled[:, 2] -= min(0.04, c.lift_height_m / 4)
+            if not c.clearance_enabled:
+                pulled[:, 2] -= min(0.04, c.lift_height_m / 4)
             lower = start - direction * (c.pullback_distance_m / 2)
             lower[:, 2] = c.table_height_m + max(c.release_height_m, c.lift_height_m / 4)
             placed = start + direction * c.place_distance_m
