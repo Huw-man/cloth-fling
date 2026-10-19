@@ -70,7 +70,11 @@ redundant native pose fields. This path never calls `observe`, changes the cache
 policy RGB/depth, steps physics, or requests debug depth. Debug objects are removed
 before subsequent clean policy rendering, preventing marker pixels/shadows/depth
 from entering the learner view. Backend native camera recording must be disabled
-for this scoped capture (use the recorder below). Native GPU isolation still needs
+for this scoped capture (use the recorder below). If `GS_DISABLE_OFFSCREEN_MARKERS`
+is present (even set to `0`), or Genesis already loaded with its disable flag set,
+marker capture fails explicitly before drawing. Start a fresh process without that
+variable; the tool never silently claims disabled markers were visible.
+Native GPU isolation still needs
 a bounded qualification run on the integrated backend.
 
 ## Recording during execution

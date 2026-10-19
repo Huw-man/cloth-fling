@@ -9,6 +9,8 @@ import copy
 import hashlib
 import json
 import math
+import os
+import sys
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
@@ -91,6 +93,17 @@ def render_debug_views(env, *, phase, selected_targets_m=None, attachment_ids=No
     """
     ids = env.attached_ids if attachment_ids is None else attachment_ids
     points = marker_positions(env.get_positions(), ids, phase, selected_targets_m)
+    # Genesis snapshots this environment flag at jit_render import/compile time.
+    # Check both states without importing or initializing Genesis here.
+    native = sys.modules.get("genesis.ext.pyrender.jit_render")
+    if points is not None and (
+        "GS_DISABLE_OFFSCREEN_MARKERS" in os.environ
+        or getattr(native, "_DISABLE_OFFSCREEN_MARKERS", False)
+    ):
+        raise RuntimeError(
+            "Native offscreen debug markers are disabled by GS_DISABLE_OFFSCREEN_MARKERS; "
+            "start a fresh process without that variable before capturing debug video"
+        )
     options = dict(rgb=True, depth=False, antialiasing=False, force_render=True)
     with preserved_camera(env.camera):
         with debug_markers(env.scene, points):
