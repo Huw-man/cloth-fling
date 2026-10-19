@@ -161,3 +161,126 @@ def test_no_hidden_particle_state_or_simulator_dependency():
 def test_bounded_boundary_subsample():
     config = replace(SelectionConfig(), max_boundary_candidates=8)
     assert len(feasible_candidates(observation(), config, max_pairs=100)) <= 8 * 7 // 2
+
+
+@pytest.mark.parametrize("thickness", [1, 2])
+@pytest.mark.parametrize("policy", ["uniform_valid", "geometry_guided"])
+def test_thin_rgb_fragments_rejected(thickness, policy):
+    obs = observation()
+    obs.rgb[:] = [64, 71, 77]
+    obs.rgb[20 : 20 + thickness, 15:48] = [200, 60, 40]
+    assert foreground_mask(obs).any()
+    with pytest.raises(NoValidPairError, match="fewer than two"):
+        select_action(obs, SceneConfig(), policy=policy)
+
+
+def test_full_3x3_erosion_rejects_diagonal_holes_and_image_border():
+    from cloth_fling.selection import conservative_foreground_mask
+
+    obs = observation()
+    obs.rgb[:] = [200, 60, 40]
+    obs.rgb[30, 30] = [64, 71, 77]
+    safe = conservative_foreground_mask(obs)
+    assert not safe[29:32, 29:32].any()  # includes all four diagonal neighbors
+    assert not safe[[0, -1], :].any() and not safe[:, [0, -1]].any()
+    assert safe[28, 28] and safe[32, 32]
+
+
+@pytest.mark.parametrize("policy", ["uniform_valid", "geometry_guided"])
+def test_selected_pixels_and_ranked_boundary_inside_raw_foreground(policy):
+    from cloth_fling.selection import conservative_foreground_mask
+
+    env = FakeClothBackend()
+    obs = env.observe()
+    raw, safe = foreground_mask(obs), conservative_foreground_mask(obs)
+    candidates = feasible_candidates(obs, env.config, max_pairs=32)
+    assert candidates
+    actions = candidates + [
+        select_action(obs, env.config, policy=policy, rng=np.random.default_rng(i))
+        for i in range(10)
+    ]
+    for selected in actions:
+        for u, v in selected.pixels:
+            u, v = int(u), int(v)
+            assert safe[v, u]
+            assert raw[v - 1 : v + 2, u - 1 : u + 2].shape == (3, 3)
+            assert raw[v - 1 : v + 2, u - 1 : u + 2].all()
+    # Geometry ranks the eroded mask boundary, not the raw silhouette.
+    for selected in candidates:
+        for u, v in selected.pixels:
+            u, v = int(u), int(v)
+            assert not (
+                safe[v - 1, u] and safe[v + 1, u] and safe[v, u - 1] and safe[v, u + 1]
+            )
+
+
+def margin_observation():
+    rgb = np.full((31, 31, 3), (64, 71, 77), dtype=np.uint8)
+    rgb[3:28, 3:28] = [200, 60, 40]
+    return Observation(
+        "snap-margin",
+        rgb,
+        np.ones((31, 31)),
+        {"world_bounds_m": [-0.2, 0.4, -0.3, 0.3], "camera_height_m": 1.0},
+    )
+
+
+@pytest.mark.parametrize("policy", ["uniform_valid", "geometry_guided"])
+def test_mesh_snap_uncertainty_reserved_for_both_endpoints(policy):
+    obs = margin_observation()
+    # SceneConfig must pass its mesh spacing into selection (not the default spacing).
+    config = SceneConfig(
+        min_grasp_separation_m=0.08,
+        max_grasp_separation_m=0.3,
+        grasp_workspace_m=0.5,
+        mesh_spacing_m=0.03,
+    )
+    uncertainty = 1.5 * config.mesh_spacing_m
+    actions = (
+        [
+            select_action(obs, config, policy=policy, rng=np.random.default_rng(i))
+            for i in range(10)
+        ]
+        if policy == "uniform_valid"
+        else feasible_candidates(obs, config, max_pairs=32)
+    )
+    assert actions
+    for selected in actions:
+        points = pixels_to_world(obs, np.asarray(selected.pixels))
+        distance = np.linalg.norm(points[1] - points[0])
+        assert distance >= config.min_grasp_separation_m + 2 * uncertainty - 1e-12
+        assert distance <= config.max_grasp_separation_m - 2 * uncertainty + 1e-12
+        assert (
+            np.abs(points[:, :2]).max()
+            <= config.grasp_workspace_m / 2 - uncertainty + 1e-12
+        )
+        # Worst-case opposite snaps along the pair direction still respect separation.
+        direction = (points[1] - points[0]) / distance
+        for sign in [-1, 1]:
+            snapped = points + sign * uncertainty * np.array([-direction, direction])
+            snapped_distance = np.linalg.norm(snapped[1] - snapped[0])
+            assert config.min_grasp_separation_m - 1e-12 <= snapped_distance
+            assert snapped_distance <= config.max_grasp_separation_m + 1e-12
+    if policy == "uniform_valid":
+        # There are visible candidates at +/-0.20m. A 0.045m margin excludes points beyond 0.205m.
+        assert all(
+            abs(value) <= 0.205
+            for selected in actions
+            for value in pixels_to_world(obs, np.asarray(selected.pixels))[
+                :, :2
+            ].ravel()
+        )
+
+
+def test_snap_margin_can_remove_all_feasible_pairs():
+    obs = margin_observation()
+    config = SelectionConfig(
+        min_grasp_separation_m=0.08,
+        max_grasp_separation_m=0.12,
+        mesh_spacing_m=0.01,
+        max_attempts=8,
+    )
+    assert feasible_candidates(obs, config) == []
+    for policy in ["uniform_valid", "geometry_guided"]:
+        with pytest.raises(NoValidPairError):
+            select_action(obs, config, policy=policy)

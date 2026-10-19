@@ -19,11 +19,17 @@ class SelectionConfig:
     min_grasp_separation_m: float = 0.08
     max_grasp_separation_m: float = 0.55
     grasp_workspace_m: float = 0.9
+    mesh_spacing_m: float = 0.01
     foreground_threshold: float = 45.0  # RGB maximum channel, uint8 scale
     foreground_chroma: float = 20.0  # rejects the known nearly gray table
     min_pixel_separation: float = 2.0
     max_attempts: int = 4096
     max_boundary_candidates: int = 512
+
+    @property
+    def snap_uncertainty_m(self) -> float:
+        """Per-endpoint surface-to-vertex snap bound agreed with the backend."""
+        return 1.5 * self.mesh_spacing_m
 
 
 def _options(config: SceneConfig | SelectionConfig) -> SelectionConfig:
@@ -37,6 +43,7 @@ def _options(config: SceneConfig | SelectionConfig) -> SelectionConfig:
         not np.isfinite(list(values.values())).all()
         or c.max_attempts < 1
         or c.max_boundary_candidates < 2
+        or c.mesh_spacing_m <= 0
         or c.min_pixel_separation <= 0
         or not isinstance(c.max_attempts, int)
         or not isinstance(c.max_boundary_candidates, int)
@@ -59,6 +66,24 @@ def foreground_mask(
     )
     high, low = np.max(rgb, axis=2) * scale, np.min(rgb, axis=2) * scale
     return (high > threshold) & (high - low > chroma)
+
+
+def conservative_foreground_mask(
+    observation: Observation, threshold: float = 45, chroma: float = 20
+) -> np.ndarray:
+    """One-pixel full 3x3 RGB erosion; image borders count as background.
+
+    Rendering silhouettes can extend beyond the ray-tested surface. Require every
+    neighbor, including diagonals, to be foreground before choosing a grasp pixel.
+    """
+    mask = foreground_mask(observation, threshold, chroma)
+    height, width = mask.shape
+    padded = np.pad(mask, 1, constant_values=False)
+    safe = np.ones_like(mask)
+    for dv in range(3):
+        for du in range(3):
+            safe &= padded[dv : dv + height, du : du + width]
+    return safe
 
 
 def pixels_to_world(observation: Observation, pixels: np.ndarray) -> np.ndarray:
@@ -121,7 +146,9 @@ def pixels_to_world(observation: Observation, pixels: np.ndarray) -> np.ndarray:
 
 def _candidates(observation, config, boundary_only=False):
     c = _options(config)
-    mask = foreground_mask(observation, c.foreground_threshold, c.foreground_chroma)
+    mask = conservative_foreground_mask(
+        observation, c.foreground_threshold, c.foreground_chroma
+    )
     if boundary_only:
         padded = np.pad(mask, 1)
         interior = (
@@ -139,7 +166,8 @@ def _candidates(observation, config, boundary_only=False):
     vu = vu[np.isfinite(depth[vu[:, 0], vu[:, 1]]) & (depth[vu[:, 0], vu[:, 1]] > 0)]
     uv = vu[:, ::-1]
     xyz = pixels_to_world(observation, uv)
-    keep = (np.abs(xyz[:, :2]) <= c.grasp_workspace_m / 2).all(axis=1)
+    workspace_limit = c.grasp_workspace_m / 2 - c.snap_uncertainty_m
+    keep = (np.abs(xyz[:, :2]) <= workspace_limit).all(axis=1)
     uv, xyz = uv[keep], xyz[keep]
     # Stable image-order sampling bounds the geometry baseline, never accesses hidden particles.
     if boundary_only and len(uv) > c.max_boundary_candidates:
@@ -153,8 +181,8 @@ def _candidates(observation, config, boundary_only=False):
 def _valid(c, uv_a, uv_b, xyz_a, xyz_b):
     distance = np.linalg.norm(xyz_b - xyz_a, axis=-1)
     return (
-        (distance >= c.min_grasp_separation_m)
-        & (distance <= c.max_grasp_separation_m)
+        (distance >= c.min_grasp_separation_m + 2 * c.snap_uncertainty_m)
+        & (distance <= c.max_grasp_separation_m - 2 * c.snap_uncertainty_m)
         & (np.linalg.norm(uv_b - uv_a, axis=-1) >= c.min_pixel_separation)
     )
 

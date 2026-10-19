@@ -78,11 +78,25 @@ chroma (`maximum-minimum`) >20. It supports uint8 RGB and float RGB in [0,1].
 This rejects the known gray table `(0.25,0.28,0.30)` as well as black background.
 The scene must use a visibly saturated cloth; gray cloth or a colored/textured
 background requires a new foreground method. Depth never supplies the foreground
-mask. Stage 0/coordinator should compare the rendered mask with ray-hit cloth
-pixels during GPU qualification; the CPU gray-table fixture is not that check.
+mask. Before either policy samples or ranks pairs, `conservative_foreground_mask`
+erodes the RGB mask by one full 3x3 neighborhood, including diagonals; image borders
+count as background. Thus each chosen pixel has eight foreground neighbors. One-
+and two-pixel-wide fragments are rejected. Geometry-guided ranking uses the boundary
+of this eroded mask. This reduces silhouette/ray disagreement but cannot correct
+stale or mismatched rendered cloth geometry. Stage 0/coordinator should compare
+the rendered mask with ray-hit cloth pixels during GPU qualification; the CPU
+gray-table fixture is not that check.
 
 `uniform_valid` samples distinct foreground pixel pairs uniformly by rejection
-with at most 4096 attempts, then checks depth, separation and workspace. Given an
+with at most 4096 attempts, then checks depth, separation and workspace.
+Both policies reserve an explicit surface-to-vertex snap uncertainty of
+`r = 1.5 * config.mesh_spacing_m` for each endpoint. Selected surface points must
+satisfy `min_separation + 2*r <= distance <= max_separation - 2*r`, and each world
+x/y coordinate must satisfy `abs(coordinate) <= grasp_workspace_m/2 - r`.
+The pair margin accounts for both endpoints snapping in opposite directions;
+the workspace margin applies to each endpoint individually. The default spacing
+is 0.01 m (r=0.015 m); `SceneConfig.mesh_spacing_m` is propagated unchanged.
+These margins can leave no feasible pair, which is reported explicitly. Given an
 explicit RNG, sampling is reproducible; the default RNG seed is 0. Exhausting the
 budget raises `NoValidPairError`, even if an unsearched feasible pair might exist.
 `geometry_guided` chooses the widest feasible RGB boundary pair with deterministic
