@@ -162,11 +162,14 @@ tests; the report records the exact config. Hard action caps are 30 simulated an
 <=0.02 m. Deadlines are checked around bounded single-step backend calls. Python
 cannot interrupt an indefinitely blocked backend call; host supervision is needed
 for backend hangs. Mandatory release and terminal observation capture still run
-after an error/deadline, so their wall overhead may extend past the deadline.
+after an ordinary error/primitive deadline, so their wall overhead may extend past
+the deadline. External `TimeoutError` (including collector timeout subclasses)
+propagates after release cleanup; it does not trigger further terminal capture.
 
 ## Outcomes and evidence
 
-`ActionOutcome` uses unchanged shared contracts. Signed coverage gain is
+`ActionOutcome.after` may be `None` only on invalid outcomes when the terminal
+observation is unavailable. Signed coverage gain is
 `coverage_after - coverage_before`, also in `diagnostics['coverage_gain']`;
 negative gains are retained. `coverage()` supplies actual backend projected cloth
 area and flat reference area. A changing flat reference is invalid.
@@ -176,11 +179,15 @@ Invalid actions/errors return `execution_valid=false`, an explicit `reason`,
 Release is attempted even after partial attachment or unexpected exceptions.
 A release that changes any cloth velocity is invalid. Finite positions/velocities
 are checked throughout. Settling timeout is invalid. The terminal observation is
-captured after cleanup; if capture fails, the outcome retains a marked fallback
-observation, unavailable coverage as NaN, and
-`diagnostics['terminal_observation_valid']=false`. Consumers must check that flag.
-A failed initial observation/coverage raises `PrimitiveFailure` after cleanup,
-since no honest contract-compatible before observation can be supplied.
+captured after cleanup. If no terminal observation can be captured, `after=None`;
+the before-observation is never substituted. A real captured observation is retained
+if a subsequent terminal state/coverage measurement fails. In either failure case,
+coverage is unavailable (NaN), the outcome is invalid, and
+`diagnostics['terminal_observation_valid']=false`. Consumers must check that flag
+and handle missing `after`. `TimeoutError` from execution, cleanup or terminal capture
+propagates to the collector/supervisor; it is never converted to an ordinary invalid
+outcome. A failed initial observation/coverage other than timeout raises
+`PrimitiveFailure` after cleanup, since no honest before-observation can be supplied.
 
 `evidence['phases']` records phase ordering. `evidence['phase_traces']` samples the
 full measured cloth positions/velocities, commanded and measured grasp positions,
@@ -213,6 +220,7 @@ Hand paths do not establish behavior quality. `quality_qualified=false` and
 `behavior_passed=null` remain explicit even when both executions complete.
 The framework is bounded to two action attempts with a cooperative total wall
 budget of twice the per-action budget, plus initial/final capture/restore overhead.
+External timeouts propagate after the final fixture-restore attempt.
 The 600-run favorable-grasp campaign is deferred.
 
 With `output_dir`, relative artifact references in the report point to:
@@ -220,7 +228,9 @@ With `output_dir`, relative artifact references in the report point to:
 - `diagnostic.json`: JSON-safe report, traces and outcome measurements (NaN becomes null).
 - `fixture.json` and `fixture.npz`: recursive snapshot metadata with `npz_key`
   references to NumPy arrays; no pickle/object arrays.
-- `{laydown,fling}_{before,after}.png`: actual RGB observations for each primitive.
+- `{laydown,fling}_{before,after}.png`: available actual RGB observations for each
+  primitive. Missing terminal observations have a null `after_rgb` reference and
+  no synthesized after PNG, depth array or calibration.
 - `{laydown,fling}_depth.npz` and `{laydown,fling}_camera.json`: privileged optical
   depth and calibration support for both observations.
 

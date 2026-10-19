@@ -457,7 +457,9 @@ def execute_action(
     """Execute without reset. Failures return invalid outcomes with terminal observation/evidence.
 
     An initial observation/coverage failure raises (no honest before-observation can be supplied).
-    Cleanup still releases attachment. Deadlines are cooperative around each backend operation.
+    Cleanup still releases attachment. TimeoutError propagates to collector/supervisor owners.
+    Missing terminal observations return after=None on an invalid outcome.
+    Deadlines are cooperative around each backend operation.
     """
     c = config or PrimitiveConfig()
     started, sim_started = time.monotonic(), float(env.simulated_time)
@@ -565,6 +567,9 @@ def execute_action(
         run.sample("released", force=True)
         run.settle()
         valid = True
+    except TimeoutError:
+        # Collector/supervisor cancellation must reach its owner after finally cleanup.
+        raise
     except Exception as exc:
         reason = (
             str(exc)
@@ -579,6 +584,8 @@ def execute_action(
                 env.release()
             if tuple(env.attached_ids):
                 raise PrimitiveFailure("cleanup_left_attachments")
+        except TimeoutError:
+            raise
         except Exception as exc:
             errors.append(
                 {"type": type(exc).__name__, "message": str(exc), "stage": "release"}
@@ -586,16 +593,21 @@ def execute_action(
             reason, valid = "release_cleanup_failed", False
     if before is None or coverage_before is None:
         raise PrimitiveFailure(f"initial_capture_failed: {reason}; errors={errors}")
+    after = None
     try:
         after = env.observe()
+        if after is None:
+            raise PrimitiveFailure("terminal_observation_unavailable")
         p, v = _state(env)
         coverage_after = _coverage(env)
         if not math.isclose(
             coverage_before[2], coverage_after[2], rel_tol=1e-8, abs_tol=1e-12
         ):
             raise PrimitiveFailure("flat_reference_changed")
+    except TimeoutError:
+        # Release cleanup has already completed before terminal capture begins.
+        raise
     except Exception as exc:
-        after = locals().get("after", before)
         coverage_after = (math.nan, math.nan, coverage_before[2])
         final_observation_valid = False
         reason, valid = f"terminal_capture_failed_{type(exc).__name__}: {exc}", False

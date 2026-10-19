@@ -427,3 +427,158 @@ def test_default_laydown_blend_stays_above_table():
     # Vertical speed becomes zero at the join while horizontal motion continues.
     join_velocity = 5 * (controls[1][1] - controls[1][0]) / c.drag_seconds
     assert (join_velocity[:, 1] > 0).all() and (join_velocity[:, 2] == 0).all()
+
+
+class CollectionTimeout(TimeoutError):
+    """Collector-owned cancellation without importing the collection implementation."""
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "initial_observe",
+        "attach",
+        "targets",
+        "step",
+        "terminal_observe",
+        "terminal_state",
+        "terminal_coverage",
+    ],
+)
+def test_collector_timeouts_propagate_after_release_cleanup(short_config, stage):
+    env = FakeClothBackend()
+    selected = action(env)
+    timeout = CollectionTimeout(f"collector cancelled at {stage}")
+
+    def fail(*args, **kwargs):
+        raise timeout
+
+    if stage == "initial_observe":
+        env.observe = fail
+    elif stage == "attach":
+
+        def partial_attach(*args):
+            env.attached_ids = (0, 1)
+            raise timeout
+
+        env.attach = partial_attach
+    elif stage == "targets":
+        env.set_attachment_targets = fail
+    elif stage == "step":
+        env.step = fail
+    else:
+        method = {
+            "terminal_observe": "observe",
+            "terminal_state": "get_positions",
+            "terminal_coverage": "coverage",
+        }[stage]
+        original = getattr(env, method)
+
+        def terminal_failure(*args, **kwargs):
+            if env.release_calls:
+                assert not env.attached_ids
+                raise timeout
+            return original(*args, **kwargs)
+
+        setattr(env, method, terminal_failure)
+        # Failure before motion routes state/coverage timeouts specifically through
+        # terminal capture, rather than the post-release settling samples.
+        if stage != "terminal_observe":
+            selected = GraspAction(((0, 0), (63, 63)))
+    with pytest.raises(CollectionTimeout) as caught:
+        execute_action(env, selected, short_config)
+    assert caught.value is timeout
+    assert env.release_calls == 1 and not env.attached_ids and env.reset_calls == 0
+
+
+def test_cleanup_timeout_is_not_swallowed(short_config):
+    env = FakeClothBackend()
+    selected = GraspAction(((0, 0), (63, 63)))
+    release = env.release
+    timeout = CollectionTimeout("cleanup deadline")
+
+    def slow_release():
+        release()
+        raise timeout
+
+    env.release = slow_release
+    with pytest.raises(CollectionTimeout) as caught:
+        execute_action(env, selected, short_config)
+    assert caught.value is timeout and not env.attached_ids
+
+
+@pytest.mark.parametrize("missing", ["raises", "returns_none"])
+def test_no_fabricated_terminal_observation(short_config, missing):
+    env = FakeClothBackend()
+    selected = action(env)
+    observe = env.observe
+
+    def unavailable_terminal():
+        if env.release_calls:
+            if missing == "raises":
+                raise RuntimeError("terminal camera unavailable")
+            return None
+        return observe()
+
+    env.observe = unavailable_terminal
+    result = execute_action(env, selected, short_config)
+    assert not result.execution_valid and result.after is None
+    assert result.before is not None
+    assert not result.diagnostics["terminal_observation_valid"]
+    assert result.reason.startswith("terminal_capture_failed")
+    assert np.isnan(result.coverage_after)
+    assert env.release_calls == 1 and not env.attached_ids
+
+
+def test_terminal_measurement_failure_keeps_actual_captured_observation(short_config):
+    env = FakeClothBackend()
+    coverage = env.coverage
+
+    def failed_terminal_coverage():
+        if env.release_calls:
+            raise RuntimeError("terminal coverage unavailable")
+        return coverage()
+
+    env.coverage = failed_terminal_coverage
+    result = execute_action(env, GraspAction(((0, 0), (63, 63))), short_config)
+    assert not result.execution_valid
+    assert result.after is not None and result.after is not result.before
+    np.testing.assert_array_equal(result.after.rgb, env.observe().rgb)
+    assert not result.diagnostics["terminal_observation_valid"]
+
+
+def test_diagnostic_missing_after_has_no_fabricated_artifact(short_config, tmp_path):
+    env = FakeClothBackend()
+    observe = env.observe
+
+    def missing_after():
+        if env.release_calls and env.step_calls and not env.attached_ids:
+            raise RuntimeError("terminal camera unavailable")
+        return observe()
+
+    env.observe = missing_after
+    report = run_diagnostic(env, primitive_config=short_config, output_dir=tmp_path)
+    assert not report["execution_valid"] and report["runs"]
+    run = report["runs"][0]
+    assert not run["diagnostics"]["terminal_observation_valid"]
+    assert run["artifacts"]["after_rgb"] is None
+    assert not (tmp_path / "laydown_after.png").exists()
+    with np.load(tmp_path / run["artifacts"]["depth"], allow_pickle=False) as depth:
+        assert "before" in depth and "after" not in depth
+
+
+def test_diagnostic_propagates_timeout_after_fixture_restore(short_config):
+    env = FakeClothBackend()
+    positions = env.positions.copy()
+    timeout = CollectionTimeout("diagnostic cancelled")
+
+    def timed_out_step():
+        raise timeout
+
+    env.step = timed_out_step
+    with pytest.raises(CollectionTimeout) as caught:
+        run_diagnostic(env, primitive_config=short_config)
+    assert caught.value is timeout
+    assert env.release_calls == 1 and not env.attached_ids
+    np.testing.assert_array_equal(env.positions, positions)
+    assert env.simulated_time == 0
