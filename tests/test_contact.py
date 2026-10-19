@@ -61,3 +61,21 @@ def test_separating_particles_are_not_friction_contacts_and_integer_inputs_are_s
     result, changed = apply(p, np.array([[1, 0, 0]], dtype=int), [True])
     assert result.dtype.kind == "f"
     assert 0 < result[0, 0] < 1
+
+
+def test_native_profile_cannot_apply_legacy_poststep_adapter():
+    from cloth_fling.contracts import SceneConfig
+    from cloth_fling.sim.backend import GenesisBackend
+
+    # No cloth/scene exists: touching a setter/readback would fail this check.
+    backend = GenesisBackend.__new__(GenesisBackend)
+    backend.config = SceneConfig(contact_profile="native_coulomb_v1")
+    backend._apply_table_friction()
+
+
+def test_historical_self_coefficients_keep_legacy_config_compatibility():
+    from cloth_fling.contracts import SceneConfig
+
+    config = SceneConfig(static_friction=0.1, kinetic_friction=0.2)
+    assert config.table_coefficients == (0.1, 0.2)
+    assert SceneConfig(**config.to_dict()) == config
