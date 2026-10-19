@@ -145,7 +145,17 @@ def collect_episodes(
         return after, state, evidence
 
     versions = {"python": platform.python_version()}
-    for package in ("cloth-fling", "numpy", "pillow", "pyarrow", "genesis-world"):
+    for package in (
+        "cloth-fling",
+        "numpy",
+        "pillow",
+        "pyarrow",
+        "genesis-world",
+        "torch",
+        "quadrants",
+        "trimesh",
+        "pymeshlab",
+    ):
         try:
             versions[package] = version(package)
         except PackageNotFoundError:

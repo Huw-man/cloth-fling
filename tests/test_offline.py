@@ -54,3 +54,23 @@ def test_reset_roundtrip_rejects_pickle_and_conflicting_keys(tmp_path):
     np.savez_compressed(tmp_path / "state.npz", positions=np.array([{}], dtype=object))
     with pytest.raises(ValueError, match="Object arrays"):
         load_reset(tmp_path)
+
+
+def test_cli_records_reset_failure_but_exits_nonzero(monkeypatch, tmp_path, capsys):
+    from cloth_fling import cli, collection
+
+    closed = []
+
+    class Backend:
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(cli, "_backend", lambda args: Backend())
+    monkeypatch.setattr(
+        collection,
+        "collect_episodes",
+        lambda *args, **kwargs: {"reset_failures": 1, "attempts": 0, "stop_reason": "reset_failed"},
+    )
+    assert cli.main(["collect", "--output", str(tmp_path)]) == 1
+    assert json.loads(capsys.readouterr().out)["reset_failures"] == 1
+    assert closed == [True]

@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
                     "coverage": list(env.coverage()),
                 }
             print(json.dumps(report, indent=2, allow_nan=False))
-            return 0
+            return 1 if args.command == "collect" and report.get("reset_failures", 0) else 0
         finally:
             env.close()
     except (ValueError, TypeError, RuntimeError, OSError, ImportError) as exc:

@@ -15,6 +15,7 @@ class SceneConfig:
     mesh_spacing_m: float = 0.01
     areal_density_kg_m2: float = 0.3
     sim_dt: float = 0.002
+    max_stretch_solver_iterations: int = 64
     table_size_m: float = 1.2
     grasp_workspace_m: float = 0.9
     min_grasp_separation_m: float = 0.08
@@ -64,6 +65,12 @@ class SceneConfig:
             raise ValueError("image_size must be at least 16")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int) or self.seed < 0:
             raise ValueError("seed must be a nonnegative integer")
+        if (
+            isinstance(self.max_stretch_solver_iterations, bool)
+            or not isinstance(self.max_stretch_solver_iterations, int)
+            or not 1 <= self.max_stretch_solver_iterations <= 128
+        ):
+            raise ValueError("max_stretch_solver_iterations must be an integer in [1, 128]")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -93,7 +100,7 @@ class GraspAction:
 @dataclass
 class ActionOutcome:
     before: Observation
-    after: Observation
+    after: Observation | None
     action: GraspAction
     coverage_before: float
     coverage_after: float

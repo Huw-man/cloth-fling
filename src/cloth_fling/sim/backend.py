@@ -89,6 +89,7 @@ class GenesisBackend:
                 sim_options=gs.options.SimOptions(dt=config.sim_dt, substeps=self.substeps),
                 rigid_options=gs.options.RigidOptions(use_gjk_collision=True),
                 pbd_options=gs.options.PBDOptions(
+                    max_stretch_solver_iterations=config.max_stretch_solver_iterations,
                     particle_size=self.particle_diameter,
                     lower_bound=(-config.table_size_m, -config.table_size_m, -0.1),
                     upper_bound=(config.table_size_m, config.table_size_m, 2.0),
