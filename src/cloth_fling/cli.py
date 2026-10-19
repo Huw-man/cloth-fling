@@ -60,6 +60,19 @@ def doctor_report() -> dict[str, Any]:
     }
 
 
+def load_reset(path: Path) -> dict[str, Any]:
+    """Read a local reset without pickle or simulator initialization."""
+    import numpy as np
+
+    metadata = json.loads((path / "state.json").read_text())
+    if not isinstance(metadata, dict):
+        raise ValueError("reset metadata must be a JSON object")
+    with np.load(path / "state.npz", allow_pickle=False) as archive:
+        if set(metadata) & set(archive.files):
+            raise ValueError("reset has conflicting array and metadata keys")
+        return {**metadata, **{key: archive[key].copy() for key in archive.files}}
+
+
 def _backend(args: argparse.Namespace):
     from cloth_fling.sim.backend import GenesisBackend
 
@@ -90,6 +103,10 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--max-actions", type=int, default=3)
     collect.add_argument("--max-wall-seconds", type=float, default=600)
     collect.add_argument("--seed", type=int, default=0)
+    collect.add_argument(
+        "--reset-dir", type=Path, help="Restore a saved reset at episode boundaries"
+    )
+    collect.add_argument("--reset-kind", choices=("flat", "drop", "fold"), default="drop")
     collect.add_argument(
         "--policy", choices=("uniform_valid", "geometry_guided"), default="uniform_valid"
     )
@@ -152,6 +169,8 @@ def main(argv: list[str] | None = None) -> int:
                     policy=args.policy,
                     primitive=args.primitive,
                     max_wall_seconds=args.max_wall_seconds,
+                    reset_state=load_reset(args.reset_dir) if args.reset_dir else None,
+                    reset_kind=args.reset_kind,
                 )
             elif args.command == "diagnose":
                 from cloth_fling.diagnostics import run_diagnostic
@@ -184,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         finally:
             env.close()
-    except (ValueError, RuntimeError, OSError, ImportError) as exc:
+    except (ValueError, TypeError, RuntimeError, OSError, ImportError) as exc:
         print(f"cloth-fling: {exc}", file=sys.stderr)
         return 1
 
