@@ -80,9 +80,11 @@ class AppearanceConfig:
 def make_surface(genesis, appearance: AppearanceConfig | None = None):
     """Before add_entity; None preserves the milestone1 legacy appearance."""
     appearance = appearance or AppearanceConfig.legacy()
-    kwargs = dict(color=(*appearance.color, 1), double_sided=True)
+    kwargs = dict(color=(*appearance.color, 1))
     if appearance.mode != "legacy":
-        kwargs.update(roughness=appearance.roughness, metallic=appearance.metallic)
+        kwargs.update(
+            roughness=appearance.roughness, metallic=appearance.metallic, double_sided=True
+        )
     return genesis.surfaces.Default(**kwargs)
 
 
