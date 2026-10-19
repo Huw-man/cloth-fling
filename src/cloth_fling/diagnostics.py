@@ -78,6 +78,10 @@ def _save_observations(directory, primitive, outcome):
     depths = {}
     cameras = {}
     for name, obs in (("before", outcome.before), ("after", outcome.after)):
+        if obs is None:
+            references[f"{name}_rgb"] = None
+            cameras[name] = None
+            continue
         filename = f"{primitive}_{name}.png"
         rgb = np.asarray(obs.rgb)
         if np.issubdtype(rgb.dtype, np.floating) and rgb.max(initial=0) <= 1:
@@ -192,6 +196,8 @@ def run_diagnostic(
             report["candidate_minus_baseline_final_coverage"] = (
                 candidate["coverage_after"] - baseline["coverage_after"]
             )
+    except TimeoutError:
+        raise
     except Exception as exc:
         report["errors"].append({"type": type(exc).__name__, "message": str(exc)})
         report["execution_valid"] = False
@@ -202,6 +208,8 @@ def run_diagnostic(
                 report["final_restore_valid"] = _fingerprint(env) == fingerprint
                 if not report["final_restore_valid"]:
                     raise ValueError("final_fixture_restore_mismatch")
+            except TimeoutError:
+                raise
             except Exception as exc:
                 report["errors"].append(
                     {
