@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 import platform
 import signal
@@ -11,11 +12,12 @@ import time
 from contextlib import contextmanager
 from dataclasses import replace
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 import numpy as np
 
 from .data import DatasetWriter
-from .provenance import runtime_provenance
+from .provenance import config_provenance, execute_recorded, runtime_provenance
 
 
 class CollectionTimeout(TimeoutError):
@@ -60,6 +62,9 @@ def collect_episodes(
     max_wall_seconds=600,
     reset_state=None,
     reset_kind="drop",
+    record_video=False,
+    appearance=None,
+    recorder_factory=None,
 ) -> dict:
     """Collect evolving-cloth episodes; see docs/dataset.md for interruption semantics.
 
@@ -98,6 +103,14 @@ def collect_episodes(
     deadline = started + max_wall_seconds
     report = {
         "simulation_only": True,
+        "recordings": [],
+        "runtime_provenance": runtime_provenance(),
+        "provenance": config_provenance(
+            env,
+            appearance=appearance,
+            primitive_config=primitive_config,
+            reset_source=reset_source,
+        ),
         "attempts": 0,
         "valid": 0,
         "invalid": 0,
@@ -174,7 +187,9 @@ def collect_episodes(
             "reset_kind": reset_kind,
             "uses_saved_reset": reset_source is not None,
             "runtime_package_versions": versions,
-            "runtime_provenance": runtime_provenance(),
+            "runtime_provenance": report["runtime_provenance"],
+            "configuration_provenance": report["provenance"],
+            "record_video": record_video,
         },
     ) as writer:
         report["run_id"] = writer.run_id
@@ -281,11 +296,26 @@ def collect_episodes(
                 tick = time.monotonic()
                 try:
                     with _deadline(deadline):
-                        outcome = executor(env, action, config=primitive_config)
+                        if record_video:
+                            outcome = execute_recorded(
+                                env,
+                                action,
+                                config=primitive_config,
+                                executor=executor,
+                                output_dir=output_dir,
+                                action_id=f"episode-{episode_id}-action-{step}",
+                                appearance=appearance,
+                                recorder_factory=recorder_factory,
+                            )
+                        else:
+                            outcome = executor(env, action, config=primitive_config)
                     # The authoritative pre-observation is the exact prior after object.
                     outcome = replace(outcome, before=current)
-                except CollectionTimeout:
+                except CollectionTimeout as exc:
                     after, state, evidence = cleanup()
+                    if hasattr(exc, "recording_evidence"):
+                        evidence["recording"] = exc.recording_evidence
+                        report["recordings"].append(exc.recording_evidence)
                     row = writer.append_outcome(
                         episode_id,
                         reason="execution_timeout",
@@ -298,6 +328,9 @@ def collect_episodes(
                     )
                 except Exception as exc:  # noqa: BLE001 - every attempted action needs a row.
                     after, state, evidence = cleanup()
+                    if hasattr(exc, "recording_evidence"):
+                        evidence["recording"] = exc.recording_evidence
+                        report["recordings"].append(exc.recording_evidence)
                     row = writer.append_outcome(
                         episode_id,
                         after=after,
@@ -308,6 +341,8 @@ def collect_episodes(
                         end_reason="execution_invalid",
                     )
                 else:
+                    if record_video:
+                        report["recordings"].append(outcome.evidence["recording"])
                     cleanup_evidence = None
                     if not outcome.execution_valid:
                         after, final_state, cleanup_evidence = cleanup()
@@ -362,4 +397,6 @@ def collect_episodes(
                 report["stop_reason"] = "max_wall_seconds"
                 break
     report["timings"]["wall_seconds"] = time.monotonic() - started
+    destination = Path(output_dir) / f"collection-report-{report['run_id']}.json"
+    destination.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
     return report

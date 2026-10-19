@@ -76,7 +76,29 @@ def load_reset(path: Path) -> dict[str, Any]:
 def _backend(args: argparse.Namespace):
     from cloth_fling.sim.backend import GenesisBackend
 
-    return GenesisBackend(load_config(args.config), backend=args.backend, headless=True)
+    return GenesisBackend(
+        load_config(args.config),
+        backend=args.backend,
+        headless=True,
+        appearance=load_appearance(args),
+    )
+
+
+def load_appearance(args):
+    """CLI defaults to matte; backend/library None remains legacy."""
+    from cloth_fling.sim.appearance import AppearanceConfig
+
+    if args.legacy_appearance:
+        return AppearanceConfig.legacy()
+    if args.appearance_config:
+        return AppearanceConfig.from_json(args.appearance_config)
+    return AppearanceConfig()
+
+
+def _appearance_options(parser):
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--appearance-config", help="Independent render-only appearance JSON")
+    group.add_argument("--legacy-appearance", action="store_true", help="Original table appearance")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,6 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--primitive-config", help="Separate motion/settling JSON overrides")
     diagnose.add_argument("--reset-kind", choices=("flat", "drop", "fold"), default="fold")
     diagnose.add_argument("--reset-dir", type=Path, help="Compare from a saved fixture")
+    diagnose.add_argument("--record-video", action="store_true", help="Native debug captures")
     diagnose.add_argument(
         "--grasp-pixels",
         type=float,
@@ -114,6 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--max-wall-seconds", type=float, default=600)
     collect.add_argument("--seed", type=int, default=0)
     collect.add_argument("--primitive-config", help="Separate motion/settling JSON overrides")
+    collect.add_argument("--record-video", action="store_true", help="Native debug captures")
     collect.add_argument(
         "--reset-dir", type=Path, help="Restore a saved reset at episode boundaries"
     )
@@ -126,6 +150,25 @@ def build_parser() -> argparse.ArgumentParser:
     for command in (doctor, resets, diagnose, collect):
         command.add_argument("--config", help="Scene JSON overrides")
         command.add_argument("--backend", choices=("gpu", "cpu"), default="gpu")
+        _appearance_options(command)
+
+    contact = sub.add_parser("diagnose-contact", help="Bounded native table-contact qualification")
+    contact.add_argument("--config", required=True, help="Native-contact SceneConfig JSON")
+    contact.add_argument("--output", type=Path, required=True)
+    contact.add_argument("--backend", choices=("gpu", "cpu"), default="gpu")
+    contact.add_argument("--duration-s", type=float, default=0.6)
+    contact.add_argument(
+        "--no-half-dt", action="store_true", help="Incomplete gate; exploratory only"
+    )
+
+    replay = sub.add_parser("replay", help="Reconstruct saved dataset/diagnostic trajectories")
+    replay.add_argument("source", type=Path)
+    replay.add_argument("--output", type=Path)
+    replay.add_argument("--episode-id", type=int)
+    replay.add_argument("--fps", type=float, default=20)
+    replay.add_argument("--max-frames", type=int, default=10000)
+    replay.add_argument("--inspect", action="store_true", help="Offline validation only")
+    _appearance_options(replay)
 
     dataset = sub.add_parser("dataset", help="Offline dataset inspection")
     data_sub = dataset.add_subparsers(dest="dataset_command", required=True)
@@ -145,6 +188,56 @@ def main(argv: list[str] | None = None) -> int:
             report = verify_dataset(args.path)
             print(json.dumps(report, indent=2, allow_nan=False))
             return 0 if report.get("valid", report.get("ok", True)) else 1
+        if args.command == "replay":
+            from cloth_fling.replay import load_replay, render_replay
+
+            if args.inspect:
+                actions, report = load_replay(args.source, episode_id=args.episode_id)
+                report["durations_seconds"] = [a.duration for a in actions]
+            else:
+                if args.output is None:
+                    raise ValueError("replay requires --output unless --inspect is set")
+                report = render_replay(
+                    args.source,
+                    args.output,
+                    fps=args.fps,
+                    episode_id=args.episode_id,
+                    appearance=load_appearance(args),
+                    max_frames=args.max_frames,
+                )
+                from cloth_fling.provenance import runtime_provenance
+
+                report["runtime_provenance"] = runtime_provenance()
+                (args.output / "replay-provenance.json").write_text(
+                    json.dumps(report, indent=2, allow_nan=False) + "\n"
+                )
+            print(json.dumps(report, indent=2, allow_nan=False))
+            return 0
+        if args.command == "diagnose-contact":
+            from cloth_fling.contact_diagnostics import run_contact_diagnostic
+
+            if (args.output / "report.json").exists():
+                raise FileExistsError("contact report exists; choose a fresh output directory")
+            if not 0.3 <= args.duration_s <= 2:
+                raise ValueError("duration-s must be in [0.3, 2]")
+            report = run_contact_diagnostic(
+                load_config(args.config),
+                output_dir=args.output,
+                backend=args.backend,
+                duration_s=args.duration_s,
+                include_half_dt=not args.no_half_dt,
+            )
+            from cloth_fling.provenance import runtime_provenance
+
+            report["runtime_provenance"] = runtime_provenance()
+            report["full_contact_gate_requested"] = not args.no_half_dt
+            if args.no_half_dt:
+                report["qualification_passed"] = False
+            (args.output / "report.json").write_text(
+                json.dumps(report, indent=2, allow_nan=False) + "\n"
+            )
+            print(json.dumps(report, indent=2, allow_nan=False))
+            return 0 if report.get("qualification_passed") and not args.no_half_dt else 1
         if args.command == "doctor":
             report = doctor_report()
             if args.probe:
@@ -167,11 +260,15 @@ def main(argv: list[str] | None = None) -> int:
             if not 0 < args.max_wall_seconds <= 86400:
                 raise ValueError("max-wall-seconds must be in (0, 86400]")
         primitive_config = None
-        if args.command in ("collect", "diagnose") and args.primitive_config:
+        if args.command in ("collect", "diagnose"):
             from cloth_fling.sim.primitives import PrimitiveConfig
 
             primitive_config = PrimitiveConfig(
-                **json.loads(Path(args.primitive_config).read_text())
+                **(
+                    json.loads(Path(args.primitive_config).read_text())
+                    if args.primitive_config
+                    else {}
+                )
             )
         env = _backend(args)
         try:
@@ -190,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
                     reset_state=load_reset(args.reset_dir) if args.reset_dir else None,
                     reset_kind=args.reset_kind,
                     primitive_config=primitive_config,
+                    record_video=args.record_video,
+                    appearance=load_appearance(args),
                 )
             elif args.command == "diagnose":
                 from cloth_fling.contracts import GraspAction
@@ -209,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
                     output_dir=args.output,
                     action=action,
                     primitive_config=primitive_config,
+                    record_video=args.record_video,
+                    appearance=load_appearance(args),
                 )
             else:
                 import numpy as np
@@ -233,11 +334,29 @@ def main(argv: list[str] | None = None) -> int:
                     "kind": args.kind,
                     "coverage": list(env.coverage()),
                 }
+                from cloth_fling.provenance import config_provenance, runtime_provenance
+
+                report["provenance"] = config_provenance(
+                    env,
+                    appearance=load_appearance(args),
+                    reset_source=state,
+                )
+                report["runtime_provenance"] = runtime_provenance()
+                (args.output / "reset-provenance.json").write_text(
+                    json.dumps(report, indent=2, allow_nan=False) + "\n"
+                )
             print(json.dumps(report, indent=2, allow_nan=False))
-            return 1 if args.command == "collect" and report.get("reset_failures", 0) else 0
+            if args.command == "diagnose":
+                return 0 if report.get("execution_valid") else 1
+            return (
+                1
+                if args.command == "collect"
+                and (report.get("reset_failures", 0) or report.get("invalid", 0))
+                else 0
+            )
         finally:
             env.close()
-    except (ValueError, TypeError, RuntimeError, OSError, ImportError) as exc:
+    except (ValueError, TypeError, KeyError, RuntimeError, OSError, ImportError) as exc:
         print(f"cloth-fling: {exc}", file=sys.stderr)
         return 1
 

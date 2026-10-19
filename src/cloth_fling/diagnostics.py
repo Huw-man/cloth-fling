@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from cloth_fling.contracts import ClothBackend, GraspAction
+from cloth_fling.provenance import config_provenance, execute_recorded, runtime_provenance
 from cloth_fling.selection import select_action
 from cloth_fling.sim.primitives import PrimitiveConfig, execute_action
 
@@ -105,6 +106,9 @@ def run_diagnostic(
     output_dir=None,
     primitive_config: PrimitiveConfig | None = None,
     action: GraspAction | None = None,
+    record_video=False,
+    appearance=None,
+    recorder_factory=None,
 ) -> dict[str, Any]:
     """Compare one laydown and one fling from the *current* saved fixture.
 
@@ -112,11 +116,20 @@ def run_diagnostic(
     velocities, attachments, clock and coverage exactly before each action and on exit.
     A restoration mismatch stops comparison and is explicitly invalid, never a new fixture.
     """
+    if record_video and output_dir is None:
+        raise ValueError("record_video requires output_dir")
+    if record_video:
+        for primitive in ("laydown", "fling"):
+            if (Path(output_dir) / "video" / f"diagnostic-{primitive}").exists():
+                raise FileExistsError("diagnostic video output exists; choose a fresh directory")
     started = time.monotonic()
     c = primitive_config or PrimitiveConfig()
     directory = Path(output_dir) if output_dir is not None else None
     report: dict[str, Any] = {
         "schema": "cloth_fling.diagnostic.v1",
+        "runtime_provenance": runtime_provenance(),
+        "provenance": config_provenance(env, appearance=appearance, primitive_config=c),
+        "recordings": [],
         "seed": seed,
         "config": asdict(c),
         "runs": [],
@@ -145,6 +158,12 @@ def run_diagnostic(
             raise ValueError("diagnostic_requires_unattached_fixture")
         fixture = copy.deepcopy(env.snapshot())
         fingerprint = _fingerprint(env)
+        report["provenance"] = config_provenance(
+            env,
+            appearance=appearance,
+            primitive_config=c,
+            reset_source=fixture,
+        )
         if action is None:
             action = select_action(
                 env.observe(),
@@ -168,7 +187,24 @@ def run_diagnostic(
             report["restore_checks"].append({"before": primitive, "valid": matched})
             if not matched:
                 raise ValueError(f"fixture_restore_mismatch_before_{primitive}")
-            outcome = execute_action(env, replace(action, primitive=primitive), c)
+            if record_video:
+                outcome = execute_recorded(
+                    env,
+                    replace(action, primitive=primitive),
+                    config=c,
+                    executor=execute_action,
+                    output_dir=directory,
+                    action_id=f"diagnostic-{primitive}",
+                    appearance=appearance,
+                    recorder_factory=recorder_factory,
+                )
+                report["recordings"].append(outcome.evidence["recording"])
+                recording = outcome.evidence["recording"]
+                if recording["recording_failed"] and recording["action_execution_valid"]:
+                    env.release()
+                    outcome = replace(outcome, after=env.observe())
+            else:
+                outcome = execute_action(env, replace(action, primitive=primitive), c)
             artifacts = (
                 _save_observations(directory, primitive, outcome) if directory is not None else {}
             )
@@ -196,9 +232,23 @@ def run_diagnostic(
             report["candidate_minus_baseline_final_coverage"] = (
                 candidate["coverage_after"] - baseline["coverage_after"]
             )
-    except TimeoutError:
+    except TimeoutError as exc:
+        report["errors"].append({"type": type(exc).__name__, "message": str(exc)})
+        report["execution_valid"] = False
+        if hasattr(exc, "recording_evidence"):
+            report["recordings"].append(exc.recording_evidence)
+            try:
+                env.release()
+            except Exception as cleanup_exc:
+                report["errors"].append({"stage": "release_cleanup", "message": str(cleanup_exc)})
         raise
     except Exception as exc:
+        if hasattr(exc, "recording_evidence"):
+            report["recordings"].append(exc.recording_evidence)
+            try:
+                env.release()
+            except Exception as cleanup_exc:
+                report["errors"].append({"stage": "release_cleanup", "message": str(cleanup_exc)})
         report["errors"].append({"type": type(exc).__name__, "message": str(exc)})
         report["execution_valid"] = False
     finally:
@@ -220,11 +270,11 @@ def run_diagnostic(
                 )
                 report["execution_valid"] = False
                 report["final_restore_valid"] = False
-    report["wall_seconds"] = time.monotonic() - started
-    report = _json_safe(report)
-    if directory is not None:
-        directory.mkdir(parents=True, exist_ok=True)
-        temporary = directory / "diagnostic.json.tmp"
-        temporary.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
-        temporary.replace(directory / "diagnostic.json")
+        report["wall_seconds"] = time.monotonic() - started
+        report = _json_safe(report)
+        if directory is not None:
+            directory.mkdir(parents=True, exist_ok=True)
+            temporary = directory / "diagnostic.json.tmp"
+            temporary.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+            temporary.replace(directory / "diagnostic.json")
     return report
