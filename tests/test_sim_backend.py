@@ -1,6 +1,7 @@
 """CPU tests exercise backend state/control rules without importing Genesis."""
 
 import hashlib
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -60,7 +61,8 @@ class Cloth:
 @pytest.fixture
 def backend():
     b = object.__new__(GenesisBackend)
-    b.config = SceneConfig(image_size=16, mesh_spacing_m=0.25)
+    b.config = SceneConfig(image_size=16, mesh_spacing_m=0.25, contact_profile="native_coulomb_v2")
+    b._runtime_settings = {"array_mode": "ndarray", "deterministic_algorithms": True}
     b._config_json = _json(b.config.to_dict())
     b._config_hash = hashlib.sha256(b._config_json.encode()).hexdigest()
     b.rest_positions, b.faces = square_mesh(0.5, 0.25)
@@ -149,6 +151,9 @@ def test_npz_restore_readback_clears_current_attachments_and_time(backend, tmp_p
     b = backend
     b.cloth.v[0] = [1, 2, 3]
     state = b.snapshot()
+    assert state["schema_version"] == 2
+    assert state["engine_version"] == "1.4.4"
+    assert state["substeps"] == 4
     observation = b.observe()
     path = tmp_path / "state.npz"
     np.savez_compressed(path, **state)
@@ -166,7 +171,10 @@ def test_npz_restore_readback_clears_current_attachments_and_time(backend, tmp_p
     assert restored.observation_id == observation.observation_id
 
 
-@pytest.mark.parametrize("corrupt", ["content", "shape", "config", "mesh", "attached", "nan"])
+@pytest.mark.parametrize(
+    "corrupt",
+    ["content", "shape", "config", "mesh", "attached", "nan", "engine", "runtime", "substeps"],
+)
 def test_invalid_restore_rejected_before_writes(backend, corrupt):
     b = backend
     state = b.snapshot()
@@ -182,11 +190,94 @@ def test_invalid_restore_rejected_before_writes(backend, corrupt):
         state["free"][0] = False
     elif corrupt == "nan":
         state["velocities"][0, 0] = np.nan
+    elif corrupt == "engine":
+        state["engine_version"] = "0.4.3"
+    elif corrupt == "runtime":
+        state["runtime_identity_json"] = "{}"
+    elif corrupt == "substeps":
+        state["substeps"] = 8
     if corrupt != "content":
         state["state_hash"] = _state_hash(state)
     with pytest.raises(ValueError):
         b.restore(state)
     assert not b.cloth.writes
+
+
+def archival_state(backend):
+    state = backend.snapshot()
+    for key in ("engine", "engine_version", "runtime_identity_json", "substeps"):
+        state.pop(key)
+    state["schema_version"] = 1
+    state["state_hash"] = _state_hash(state)
+    return state
+
+
+def test_old_physical_state_rejected_even_with_identical_mesh(backend):
+    state = archival_state(backend)
+    with pytest.raises(ValueError, match="schema-1 Genesis 0.4.3"):
+        backend.restore(state)
+    assert not backend.cloth.writes
+
+
+@pytest.mark.parametrize("profile", ["legacy_mg_v1", "native_coulomb_v1"])
+def test_archival_profiles_parse_but_cannot_construct_runtime(profile):
+    config = SceneConfig(contact_profile=profile)
+    assert SceneConfig(**config.to_dict()) == config
+    with pytest.raises(ValueError, match="archival only.*native_coulomb_v2"):
+        GenesisBackend(config)
+
+
+@pytest.mark.parametrize("version", ["0.4.3", "1.4.3", "1.4.5", "1.4.4.dev0"])
+def test_wrong_engine_rejected_before_initialization(monkeypatch, version):
+    monkeypatch.setitem(sys.modules, "genesis", SimpleNamespace(__version__=version))
+    with pytest.raises(RuntimeError, match="requires Genesis 1.4.4"):
+        GenesisBackend(SceneConfig(contact_profile="native_coulomb_v2"))
+
+
+def test_recorded_geometry_explicitly_latches_out_physics(backend):
+    state = archival_state(backend)
+    backend.scene.step = lambda: pytest.fail("recorded geometry must never step")
+    backend.restore_recorded_geometry(state)
+    np.testing.assert_array_equal(backend.get_positions(), state["positions"])
+    assert backend.capabilities["render_only"]
+    assert not backend.capabilities["physical_restore"]
+    assert backend.recorded_geometry_identity["source_engine_version"] == "0.4.3"
+    assert backend.simulated_time == state["simulated_time"]
+    for operation in (
+        lambda: backend.step(),
+        lambda: backend.reset(),
+        lambda: backend.snapshot(),
+        lambda: backend.restore(state),
+        lambda: backend.attach(((0, 0), (1, 1))),
+        lambda: backend.set_attachment_targets(np.zeros((2, 3))),
+    ):
+        with pytest.raises(RuntimeError, match="render-only"):
+            operation()
+
+
+@pytest.mark.parametrize("key", ["faces", "rest_positions", "edges", "mesh_hash", "positions"])
+def test_recorded_geometry_rejects_conversion_before_mutation(backend, key):
+    state = archival_state(backend)
+    if key == "mesh_hash":
+        state[key] = "different"
+    elif key == "positions":
+        state[key] = np.zeros((2, 3))
+    else:
+        state[key].flat[0] += 1
+    state["state_hash"] = _state_hash(state)
+    with pytest.raises(ValueError):
+        backend.restore_recorded_geometry(state)
+    assert not backend.cloth.writes
+    assert not backend.capabilities["render_only"]
+
+
+def test_runtime_metadata_is_copy_and_appearance_independent(backend):
+    identity = backend.runtime_identity
+    assert identity["engine_version"] == "1.4.4"
+    identity["native_source_sha256_ast"].clear()
+    assert backend.runtime_identity["native_source_sha256_ast"]
+    backend.appearance = "unrelated visual appearance"
+    assert backend.runtime_identity["substeps"] == 4
 
 
 def test_observation_array_isolation_and_content_identity(backend):

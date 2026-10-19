@@ -1,7 +1,7 @@
 """Bounded, privileged native table-contact diagnostics, independent of primitives.
 
-Run ``python -m cloth_fling.contact_diagnostics --config configs/contact-native-v1.json
---output-dir runs/contact-native-v1``. No rendering, reset shaping or action tuning.
+Run ``python -m cloth_fling.contact_diagnostics --config configs/contact-native-v2.json
+--output-dir runs/contact-native-v2``. No rendering, reset shaping or action tuning.
 """
 
 from __future__ import annotations
@@ -85,14 +85,15 @@ def run_contact_diagnostic(
     from cloth_fling.sim.backend import GenesisBackend
 
     config = config if isinstance(config, SceneConfig) else SceneConfig(**config)
-    if config.contact_profile != "native_coulomb_v1":
-        raise ValueError("diagnostics require native_coulomb_v1")
+    if config.contact_profile != "native_coulomb_v2":
+        raise ValueError("diagnostics require native_coulomb_v2")
     if not np.isfinite(duration_s) or not 0.3 <= duration_s <= 2:
         raise ValueError("duration_s must be in [.3, 2]")
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "engine_version": "1.4.4",
         "config": config.to_dict(),
         "backend": backend,
         "material_claim": "engineering priors; not measured terry/desk coefficients",
@@ -119,6 +120,7 @@ def run_contact_diagnostic(
                     from cloth_fling.sim.native_contact import _SOURCE_HASHES
 
                     report["runtime"] = {
+                        **env.runtime_identity,
                         "genesis": gs.__version__,
                         "device": str(gs.device),
                         "particle_diameter_m": env.particle_diameter,
@@ -160,6 +162,8 @@ def run_contact_diagnostic(
                         velocities=vs,
                         dt=cfg.sim_dt,
                         config_json=json.dumps(cfg.to_dict()),
+                        engine_version="1.4.4",
+                        runtime_identity_json=json.dumps(env.runtime_identity, sort_keys=True),
                         native_contact_columns=np.array(native["columns"]),
                         native_contact_values=native["values"],
                     )

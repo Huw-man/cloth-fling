@@ -48,18 +48,25 @@ def test_random_friction_energy_nonincrease_coulomb_bound_and_normal_invariance(
 
 
 def test_source_guard_rejects_version_and_changed_executable_source():
-    with pytest.raises(RuntimeError, match="0.4.3"):
-        validate_native_source("0.4.4", "")
+    with pytest.raises(RuntimeError, match="requires Genesis 1.4.4"):
+        validate_native_source("0.4.3", "")
     with pytest.raises(RuntimeError, match="source"):
-        validate_native_source("0.4.3", "class LegacyCoupler: pass")
+        validate_native_source("1.4.4", "class LegacyCoupler: pass")
     # Find source without importing Genesis (which initializes dependencies).
     spec = importlib.util.find_spec("genesis")
     if spec is None:
         pytest.skip("Genesis source unavailable")
     source = (Path(spec.origin).parent / "engine/couplers/legacy_coupler.py").read_text()
-    assert len(validate_native_source("0.4.3", source)) == 2
+    assert len(validate_native_source("1.4.4", source)) == 2
+    assert validate_native_source("1.4.4", source) == validate_native_source(
+        "1.4.4", source.replace("# we don't consider friction for now", "# comment only")
+    )
     with pytest.raises(RuntimeError, match="source"):
-        validate_native_source("0.4.3", source.replace("energy_loss = 0.0", "energy_loss = 0.1"))
+        validate_native_source("1.4.4", source.replace("energy_loss = 0.0", "energy_loss = 0.1"))
+    with pytest.raises(RuntimeError, match="source"):
+        validate_native_source(
+            "1.4.4", source.replace("if geoms_info.needs_coup[i_g]:", "if True:")
+        )
     ast.parse(source)
 
 
@@ -67,10 +74,13 @@ def test_profile_config_separates_table_from_self_and_preserves_old_json():
     old = SceneConfig().to_dict()
     assert "contact_profile" not in old and "table_static_friction" not in old
     assert SceneConfig(**old) == SceneConfig()
-    native = SceneConfig(contact_profile="native_coulomb_v1")
+    native = SceneConfig(contact_profile="native_coulomb_v2")
     assert native.table_coefficients == (0.4, 0.3)
     assert native.static_friction == native.kinetic_friction == 0.15
     assert SceneConfig(**json.loads(json.dumps(native.to_dict()))) == native
+    archived = SceneConfig(contact_profile="native_coulomb_v1")
+    assert SceneConfig(**archived.to_dict()) == archived
+    assert archived.table_coefficients == native.table_coefficients
     for values in (
         {"contact_profile": "bad"},
         {"table_static_friction": -1},
@@ -78,6 +88,16 @@ def test_profile_config_separates_table_from_self_and_preserves_old_json():
     ):
         with pytest.raises(ValueError):
             SceneConfig(**values)
+
+
+def test_v2_profiles_keep_archival_priors_and_old_files_unchanged():
+    for name in ("native", "low", "high"):
+        old = json.loads(Path(f"configs/contact-{name}-v1.json").read_text())
+        new = json.loads(Path(f"configs/contact-{name}-v2.json").read_text())
+        assert old["contact_profile"] == "native_coulomb_v1"
+        assert new.pop("contact_profile") == "native_coulomb_v2"
+        old.pop("contact_profile")
+        assert old == new
 
 
 def test_contact_module_import_is_simulator_free():

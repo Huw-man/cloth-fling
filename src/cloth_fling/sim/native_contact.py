@@ -1,4 +1,4 @@
-"""Scene-local Genesis 0.4.3 normal-impulse Coulomb extension.
+"""Scene-local Genesis 1.4.4 normal-impulse Coulomb extension (native_coulomb_v2).
 
 No Genesis or torch imports until installation. Never edits upstream files or classes.
 """
@@ -23,17 +23,19 @@ CONTACT_TRACE_COLUMNS = (
     "positive_friction_work_j",
 )
 CONTACT_TRACE_CAPACITY = 8192
+ENGINE_VERSION = "1.4.4"
+CONTACT_PROFILE = "native_coulomb_v2"
 
 _SOURCE_HASHES = {
-    "_func_pbd_collide_with_rigid_geom": "2fa83fee4c1435d6dfa68118e049c31974167c2147067b8a19fb90a66dfd62e4",
-    "kernel_pbd_rigid_collide": "06805ee8f1a3068791d22c08bbdd80cd4024095f1ed553f17eb97d03b3d7faa5",
+    "_func_pbd_collide_with_rigid_geom": "361ffa8a0d00b2ebfbe61575664928a2ee17be54539118f446cd873f5cce029b",
+    "kernel_pbd_rigid_collide": "725be888ab0915700fc7adce9266ad03c7160627a6612c05f8523bcee964630c",
 }
 
 
 def validate_native_source(version, source):
     """AST guard ignores whitespace/comments, rejects changed executable source."""
-    if version != "0.4.3":
-        raise RuntimeError("native_coulomb_v1 requires Genesis 0.4.3")
+    if version != ENGINE_VERSION:
+        raise RuntimeError(f"{CONTACT_PROFILE} requires Genesis {ENGINE_VERSION}; got {version}")
     try:
         tree = ast.parse(textwrap.dedent(source))
         cls = next(
@@ -47,7 +49,7 @@ def validate_native_source(version, source):
     except (SyntaxError, StopIteration) as error:
         raise RuntimeError("unsupported Genesis native contact source") from error
     if actual != _SOURCE_HASHES:
-        raise RuntimeError(f"unsupported Genesis 0.4.3 native contact source: {actual}")
+        raise RuntimeError(f"unsupported Genesis {ENGINE_VERSION} native contact source: {actual}")
     return actual
 
 
@@ -63,6 +65,8 @@ def install_native_contact(scene, table, config):
     from genesis.engine.couplers.legacy_coupler import LegacyCoupler
     from genesis.utils import array_class
 
+    if config.contact_profile != CONTACT_PROFILE:
+        raise RuntimeError(f"Genesis {ENGINE_VERSION} native contact requires {CONTACT_PROFILE}")
     validate_native_source(gs.__version__, inspect.getsource(LegacyCoupler))
     if scene.is_built:
         raise RuntimeError("native contact must be installed before scene.build")
@@ -122,7 +126,8 @@ def install_native_contact(scene, table, config):
                 raise RuntimeError("nonfinite native contact accounting")
             result = {
                 "schema_version": 1,
-                "profile": "native_coulomb_v1",
+                "profile": CONTACT_PROFILE,
+                "engine_version": ENGINE_VERSION,
                 "epoch": self._accounting_epoch,
                 "substeps": int(self.accounting_steps[None]),
                 "totals": dict(zip(CONTACT_TRACE_COLUMNS, values.tolist(), strict=True)),
@@ -177,7 +182,7 @@ def install_native_contact(scene, table, config):
             geoms_info: array_class.GeomsInfo,
             links_state: array_class.LinksState,
             sdf_info: array_class.SDFInfo,
-            rigid_global_info: array_class.RigidGlobalInfo,
+            rigid_info: array_class.RigidInfo,
             collider_static_config: qd.template(),
         ):
             new_pos, new_vel, normal = LegacyCoupler._func_pbd_collide_with_rigid_geom(
@@ -193,7 +198,7 @@ def install_native_contact(scene, table, config):
                 geoms_info,
                 links_state,
                 sdf_info,
-                rigid_global_info,
+                rigid_info,
                 collider_static_config,
             )
             normal_velocity = new_vel
@@ -213,10 +218,10 @@ def install_native_contact(scene, table, config):
                     new_vel += friction_dv
                     # Fixed table: retain equal/opposite native coupling accounting.
                     self.rigid_solver._func_apply_coupling_force(
-                        pos_world,
-                        -mass * friction_dv / self.rigid_solver._substep_dt,
                         geoms_info.link_idx[geom_idx],
                         batch_idx,
+                        pos_world,
+                        -mass * friction_dv / self.rigid_solver._substep_dt,
                         links_state,
                     )
             # Accounting never participates in the physical impulse calculation.
