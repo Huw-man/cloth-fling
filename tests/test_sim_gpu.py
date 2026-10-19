@@ -90,7 +90,7 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
     """Fold must be the FIRST rendered state, to catch unallocated GL buffers."""
     report = {}
     stamp = time.monotonic()
-    with GenesisBackend(SceneConfig()) as backend:
+    with GenesisBackend(SceneConfig(contact_profile="native_coulomb_v2")) as backend:
         report["physics_vertices"] = backend.cloth.n_particles
         report["visual_vertices"] = backend.cloth.n_vverts
         report["physics_faces"] = len(backend.faces)
@@ -168,7 +168,7 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
 def test_host_pipeline(tmp_path):
     start = time.monotonic()
     report = {}
-    with GenesisBackend(SceneConfig()) as backend:
+    with GenesisBackend(SceneConfig(contact_profile="native_coulomb_v2")) as backend:
         report["build_seconds"] = time.monotonic() - start
         report["particles"] = len(backend.rest_positions)
         report["faces"] = len(backend.faces)
