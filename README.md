@@ -40,8 +40,10 @@ or `nvidia-smi` alone as a successful physics/rendering test.
 
 ## Milestone 2 quickstart
 
-For new experiments, explicitly select `configs/contact-native-v1.json`, matte appearance
-and `configs/primitive-default.json`. This retains the 50 x 50 cm synthetic cloth and uses
+For new experiments, explicitly select `configs/contact-native-v1.json` and matte
+appearance. `configs/primitive-default.json` remains the 0.12 m reference motion;
+`configs/primitive-full-lift-laydown-v2.json` is the preferred experimental laydown
+profile for bounded follow-up checks, with 0.30 m laydown and the same 0.06 m drag. This retains the 50 x 50 cm synthetic cloth and uses
 native table friction bounded by normal contact impulses, with provisional static/kinetic coefficients
 0.40/0.30. These are engineering priors, not calibrated terry/desk measurements; see
 [contact qualification](docs/contact.md). CLI rendering defaults to matte, and the explicit
@@ -81,7 +83,20 @@ Laydown then places diagonally, drags and releases. Fling retains both grasps th
 swing, pullback and placement, releasing near the table. Motion/settling settings remain
 separate from scene physics and appearance; full executed settings stay in evidence.
 
-The single diagnostic above is an inspection example, not the complete acceptance gate.
+The experimental laydown profile contains every `PrimitiveConfig` field and changes only
+`laydown_distance_m` from 0.12 m to 0.30 m relative to the reference profile. All other
+distances, physics, clearance, strain, speed, acceleration and timeout guards are unchanged.
+The dataclass/reference defaults and explicit milestone 1 legacy profile remain unchanged.
+
+Interim coordinator checks of the 0.30 m laydown plus 0.06 m drag, with full clearance,
+reported final coverage about 0.99995 on the seed 11 fixture and 0.9999 on the frozen seed 17
+fixture, with low strain. These are two fixed-case passes. Seed 23 with the old grasp pair
+fails during the initial lift; dynamic fling remains unqualified. The profile does not
+qualify arbitrary grasps, reset distributions, repeated-action behavior or broad collection.
+A fresh reset with the same seed does not reproduce the frozen fixture and reviewed pair.
+See [the experimental profile and evidence limits](docs/dataset.md#experimental-full-lift-laydown-profile).
+
+The single reference diagnostic above is an inspection example, not the complete acceptance gate.
 Before collection, complete the [approved milestone 2 comparisons](docs/milestone2.md):
 legacy versus clearance motion for both primitives on the original favorable fixture and
 predetermined seeds 17/23, exact restoration within each profile, clearance on every accepted
@@ -92,7 +107,7 @@ run the bounded two-action evolving-cloth episode:
 ```bash
 uv run --locked --extra sim --extra video cloth-fling collect \
   --config configs/contact-native-v1.json --appearance-config configs/appearance-matte.json \
-  --primitive-config configs/primitive-default.json --reset-dir runs/m2-reset-11 \
+  --primitive-config configs/primitive-full-lift-laydown-v2.json --reset-dir runs/m2-reset-11 \
   --episodes 1 --max-actions 2 --primitive laydown --record-video --output runs/m2-episodes-11
 
 uv run --locked cloth-fling dataset verify runs/m2-episodes-11
