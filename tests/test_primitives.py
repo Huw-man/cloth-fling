@@ -109,7 +109,7 @@ def test_negative_gain_and_determinism(short_config):
     outcomes = [execute_action(env, action(env), short_config) for env in envs]
     assert outcomes[0].execution_valid, outcomes[0].reason
     assert outcomes[0].diagnostics["coverage_gain"] < 0
-    assert outcomes[0].evidence == outcomes[1].evidence
+    np.testing.assert_equal(outcomes[0].evidence, outcomes[1].evidence)
     np.testing.assert_array_equal(envs[0].positions, envs[1].positions)
 
 

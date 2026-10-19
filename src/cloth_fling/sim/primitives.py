@@ -293,8 +293,8 @@ class _Execution:
                     if self.grasp_ids
                     else [],
                     "attachment_ids": list(self.env.attached_ids),
-                    "cloth_positions_m": p.tolist(),
-                    "cloth_velocities_m_s": v.tolist(),
+                    "cloth_positions_m": p.copy(),
+                    "cloth_velocities_m_s": v.copy(),
                     "coverage": coverage,
                     "area_m2": area,
                     "max_edge_strain_proxy": strain,
