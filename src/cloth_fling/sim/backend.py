@@ -306,6 +306,25 @@ class GenesisBackend:
             "render_only": getattr(self, "_render_only", False),
         }
 
+    @property
+    def rendering_identity(self) -> dict[str, Any] | None:
+        """Forward renderer-owned identity; absent metadata remains unknown.
+
+        PhysicsMeshRendering may expose a JSON-safe ``identity`` dictionary.
+        Copy it so provenance consumers cannot mutate the installed adapter.
+        This metadata never participates in physical snapshot compatibility.
+        """
+        adapter = getattr(self, "_physics_mesh_rendering", None)
+        identity = getattr(adapter, "identity", None)
+        return None if identity is None else json.loads(_json(identity))
+
+    @property
+    def rendering_capabilities(self) -> dict[str, Any] | None:
+        """Forward the adapter's JSON-safe ``capabilities`` dictionary, if supplied."""
+        adapter = getattr(self, "_physics_mesh_rendering", None)
+        capabilities = getattr(adapter, "capabilities", None)
+        return None if capabilities is None else json.loads(_json(capabilities))
+
     def _dirty(self) -> None:
         self._observation = None
 

@@ -95,6 +95,14 @@ unsupported, with no interpolation or hidden stepping. Construct a fresh backend
 for physics. `runtime_identity` and `capabilities` provide JSON-safe metadata for
 CLI/provenance; neither property asserts qualification.
 
+The backend also forwards optional renderer-owned metadata:
+`backend.rendering_identity` reads `PhysicsMeshRendering.identity`, and
+`backend.rendering_capabilities` reads `PhysicsMeshRendering.capabilities`.
+Both adapter attributes should be JSON-safe dictionaries (properties are fine).
+Backend access returns a detached copy. Missing metadata remains `None`/JSON
+`null`; runtime version alone never implies a renderer capability or passed
+qualification. These visual fields are excluded from physical snapshots.
+
 The 1.4.4 PBD public entity setters/getters, `fix_particles(...,
 zero_velocity=False)` and `release_particle` retain their roles. The cloth loader
 still remeshes to PBD `particle_size`; `Cloth.rho` still denotes kg/m² and mass is

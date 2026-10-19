@@ -280,6 +280,28 @@ def test_runtime_metadata_is_copy_and_appearance_independent(backend):
     assert backend.runtime_identity["substeps"] == 4
 
 
+def test_optional_renderer_metadata_stays_unknown_until_adapter_supplies_it(backend):
+    assert backend.rendering_identity is None
+    assert backend.rendering_capabilities is None
+    backend._physics_mesh_rendering = SimpleNamespace()
+    assert backend.rendering_identity is None
+    assert backend.rendering_capabilities is None
+
+
+def test_renderer_metadata_is_copied_and_excluded_from_physics_identity(backend):
+    state = backend.snapshot()
+    backend._physics_mesh_rendering = SimpleNamespace(
+        identity={"engine_version": "1.4.4", "adapter": {"revision": "example"}},
+        capabilities={"depth": {"two_sided": True}},
+    )
+    identity, capabilities = backend.rendering_identity, backend.rendering_capabilities
+    identity["adapter"]["revision"] = "changed"
+    capabilities["depth"]["two_sided"] = False
+    assert backend.rendering_identity["adapter"]["revision"] == "example"
+    assert backend.rendering_capabilities["depth"]["two_sided"]
+    assert backend.snapshot()["state_hash"] == state["state_hash"]
+
+
 def test_observation_array_isolation_and_content_identity(backend):
     b = backend
     one = b.observe()
