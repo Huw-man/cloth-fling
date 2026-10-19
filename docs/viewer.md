@@ -260,6 +260,58 @@ are not silently discarded or imported as new-runtime physical state.
 
 ## Validation scope
 
+### Prepared Genesis 1.4.4 native checks
+
+`tests/test_genesis144_gpu.py` is an opt-in, serial static-scene suite. Collecting
+or running it without `CLOTH_FLING_RUN_GENESIS144_GPU=1` skips all five cases
+without importing Genesis, torch or Quadrants. CPU validation of that skip gate
+does not qualify the GPU. The coordinator runs the following only after obtaining
+the exclusive GPU lease, using the prepared latest-runtime Python in
+`GENESIS144_PYTHON` (never the old `.venv`):
+
+```bash
+UV_CACHE_DIR=/tmp/cloth-fling-uv-cache PYTHONPATH=$PWD/src \
+  CLOTH_FLING_RUN_GENESIS144_GPU=1 "$GENESIS144_PYTHON" -m pytest -q -s \
+  tests/test_genesis144_gpu.py -k 'not historical' \
+  --basetemp runs/genesis144/visual-checks-new
+```
+
+Choose a fresh `--basetemp`: pytest clears that directory when starting. Run
+serially, without xdist. Three independent small scenes check native table PBR
+texture/UVs and actual .8/0 factors; selected/attached/released red-blue 10 mm
+spheres in both views; measured rather than commanded attachment positions;
+camera debug/pose and external-object cleanup on success and injected failure;
+bitwise clean policy RGB/depth, cache identity, snapshots and release velocity;
+schema-2 NPZ round-trip at the same scene time; and a static folded-mesh native
+depth comparison against independent physical triangle rays, including visible
+backfaces (maximum error <1 mm). No reset generator or physics step is allowed.
+The archival boundary case uses a **synthetic schema-1 envelope on the current
+mesh** to check physical rejection, zeroed render-only velocities/free flags and
+the irreversible no-physics latch. It does not establish historical mesh
+compatibility.
+
+Historical replay is separately opt-in with explicit immutable sources:
+
+```bash
+UV_CACHE_DIR=/tmp/cloth-fling-uv-cache PYTHONPATH=$PWD/src \
+  CLOTH_FLING_RUN_GENESIS144_GPU=1 \
+  CLOTH_FLING_GENESIS144_REPLAY_DATASET=runs/historical-dataset \
+  CLOTH_FLING_GENESIS144_REPLAY_DIAGNOSTIC=runs/historical-diagnostic/diagnostic.json \
+  "$GENESIS144_PYTHON" -m pytest -q -s tests/test_genesis144_gpu.py \
+  -k historical --basetemp runs/genesis144/historical-replay-checks-new
+```
+
+Each historical case caps output at **two frames**, forbids stepping/reset,
+hashes the complete source file set before and after (including existing videos),
+verifies encoded video hashes and source/renderer identities, and writes new
+outputs outside the source tree. Missing source variables skip that case.
+An incompatible remesh fails precisely; the report preserves the exception and
+source-immutability result, never silently substitutes a mesh or reports a
+successful historical replay. Saved PNGs, NPZs and JSON reports remain in each
+pytest case directory for review. Passing these bounded checks does not promote
+primitive/contact/behavior qualification or change the renderer's unqualified
+metadata automatically.
+
 CPU tests cover deterministic table texture and actual material readback validation,
 marker measurement/release behavior, exception cleanup, unchanged policy caches,
 camera/state preservation, writer lifecycle, both legacy formats, no-step guards,

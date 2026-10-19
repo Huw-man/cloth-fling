@@ -2,7 +2,9 @@
 
 import copy
 import json
+import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -24,6 +26,29 @@ from cloth_fling.sim.appearance import (
     install_visual_texture,
     make_surface,
 )
+
+
+def test_genesis144_gpu_collection_skips_without_importing_native_dependencies():
+    code = """
+import os, sys
+os.environ.pop("CLOTH_FLING_RUN_GENESIS144_GPU", None)
+class Block:
+    def find_spec(self, fullname, *args):
+        if fullname.split(".")[0] in {"genesis", "torch", "quadrants"}:
+            raise RuntimeError("offline GPU-test collection imported " + fullname)
+sys.meta_path.insert(0, Block())
+import pytest
+assert pytest.main(["-q", sys.argv[1], "-p", "no:cacheprovider"]) == 0
+assert not any(name.split(".")[0] in {"genesis", "torch", "quadrants"} for name in sys.modules)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(Path(__file__).with_name("test_genesis144_gpu.py"))],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "5 skipped" in result.stdout
 
 
 class DebugScene:
