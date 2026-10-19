@@ -76,3 +76,89 @@ it is not learned RGB-only behavior evidence.
 
 The fixture agent's CPU tests do not qualify simulator or primitive behavior.
 The coordinator runs simulator work serially after integration under its GPU lease.
+
+## Offline reporting
+
+`report_benchmark(output_dir)` reads pilot datasets under `pilot/**/manifest.json`
+and writes `benchmark-report.json` and a self-contained `index.html` with embedded
+SVG coverage curves, representative initial/terminal RGB, and relative links to
+native videos. It uses no external web libraries and constructs no simulator.
+Missing video examples are labeled as unavailable; it never invents capture evidence.
+Native grasp spheres are supplied by the existing recorder, not drawn onto RGB by
+this reporting module.
+
+Each dataset episode must bind to the frozen benchmark through
+`episode.metadata.benchmark` or
+`run.metadata.episode_metadata.benchmark` with `manifest_sha256`, `fixture_id`,
+`selector`, and `qualification_sha256`. Its metadata also confirms
+`initial_settled: true`. The run keeps existing `configuration_provenance` and
+`primitive_config`; these must match the frozen scene/appearance/numerical identity
+and qualified laydown settings. Optional `selection_config` / `selector_config`
+metadata, when present, must match the frozen selection settings. Episode split,
+reset-group and cloth IDs must match the fixture. The source snapshot and observed
+reset must match the exact paired frozen state, and the first recorded coverage
+must match the frozen initial coverage. Dataset hashes and all support files are
+verified. Duplicate fixture-selector episodes, changed configurations, altered
+states, and changed recording hashes are rejected. Unfinished datasets remain in
+the report with explicit incomplete flags and cannot pass the gate.
+
+Declared selectors are `uniform_valid` and `geometry_guided`; the latter's native
+transition policy label `geometry_guided_privileged_depth` is accepted and explicitly
+reported as privileged-depth-assisted. This is not learned RGB-only policy evidence.
+Complete early closures include `settled_coverage_threshold` and
+`initially_unfolded`, as well as no-pair/invalid terminal episodes. Interruptions,
+timeouts, reset failures and selection failures remain incomplete.
+
+Curves have six points: initial and actions 1..5. A valid terminal updates the
+curve only when its evidence explicitly confirms `diagnostics.settled: true`.
+Successful early terminal coverage carries forward. An invalid action carries the
+last **confirmed settled** coverage (initial if none), while its observed terminal
+geometry is separately reported with reason and settling status. Negative valid
+gains remain negative. Missing steps and missing episodes carry the frozen initial
+or most recent confirmed coverage, retain missing/incomplete flags, and stay in
+the group denominator. A per-episode success means final confirmed coverage >= .95;
+its success fraction includes missing and failed groups. No-pair fraction uses the
+same episode denominator. Invalid/valid attempt rates use actual attempted actions;
+missing episodes are reported separately and never become fictitious attempts.
+
+The report compares selectors on each exact frozen reset and gives paired final
+coverage differences, both selector curves, final coverage, signed improvement,
+success fraction, invalid/no-pair rates, failure evidence and separate recorded /
+unrecorded execution timing. Execution row timing excludes reset/restore/selection
+and persistence overhead; the durable ledger charges whole simulator operations.
+
+The heldout geometry gate requires six heldout reset groups, all twelve paired
+selector episodes complete, mean geometry final improvement >= .10, strictly
+positive geometry final improvement in at least four of six groups, geometry valid
+attempt fraction >= .80, passed fixture preparation and physical qualification,
+and no unresolved integrity or budget evidence. Missing/incomplete episodes cannot
+produce a passing gate. The report does not retune settings or rerun heldout.
+
+## Validation delivered by fixture/evidence agent
+
+CPU verification uses synthetic environments and existing DatasetWriter artifacts:
+first-six ordering, rejected-fold/pool stops, safe failed/nonfinite state storage,
+interruption without replay, immutable document and NPZ hash rejection, split
+isolation, durable per-category/six-hour budgets, paired one-shot pilot claims,
+negative/invalid/unconfirmed settled curves, missing/incomplete denominators,
+privileged selector labels, accepted early closures, frozen config rejection,
+offline imports, and both passing/failing heldout gate calculations. These are
+software contract checks, not physical behavior qualification. Real simulator
+results belong to the coordinator's later serial execution and final results.
+
+A preparation-only report requires no qualification artifact. It includes every
+reset attempt and rejection, per-pool accepted/required counts, failed pre-action
+checks, and relative links to saved accepted/rejected JSON and NPZ state bundles.
+If preparation stops at a pool limitation, qualification/pilot/heldout stages are
+**NOT EVALUATED** until corresponding evidence exists. The heldout gate then has
+`evaluated: false`, `passed: null`, and `status: not_evaluated`; this is not a failed
+behavior result. With no observed pilot episodes, pilot curves are empty and
+explicitly missing, final behavior metrics are null, and initial coverage remains
+reset-preparation evidence. Missing paired comparisons are null rather than
+fabricated zero differences. In mixed observed/missing groups, coverage aggregates
+retain missing frozen initial baselines and disclose that accounting in curve status.
+
+Diagnostic references carrying provenance are also checked against frozen scene,
+appearance/numerical settings and the fixture state content hash. Provided fixed
+pixels and primitive configurations must match their diagnostic source. This does
+not replace the coordinator's physical qualification gate computation.
