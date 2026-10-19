@@ -209,6 +209,48 @@ def test_appearance_provenance_is_independent_of_physics():
     )
 
 
+def test_engine_and_source_identity_do_not_inherit_qualification():
+    env = FakeEnv()
+    env.runtime_identity = {"engine_version": "1.4.4", "physics_schema_version": 2}
+    env.capabilities = {"contact_qualification": "unqualified_on_1.4.4"}
+    env.rendering_identity = {"backend": "test_rasterizer"}
+    env.rendering_capabilities = {"recorded_geometry": "exact_rest_mesh_only"}
+    historical = {
+        "schema_version": 1,
+        "config_json": json.dumps(env.config.to_dict()),
+        "positions": env.snapshot()["positions"],
+    }
+    result = config_provenance(env, reset_source=historical)
+    assert result["runtime_identity"]["engine_version"] == "1.4.4"
+    assert result["backend_capabilities"]["contact_qualification"] == "unqualified_on_1.4.4"
+    assert result["rendering_identity"] == env.rendering_identity
+    assert result["rendering_capabilities"] == env.rendering_capabilities
+    assert result["contact_profile"] == env.config.contact_profile
+    assert result["source_snapshot_identity"]["schema_version"] == 1
+    assert result["source_snapshot_identity"]["engine_version"] is None
+    assert result["source_snapshot_identity"]["config_json"] == historical["config_json"]
+    unknown = config_provenance(FakeEnv())
+    assert unknown["runtime_identity"] is None
+    assert unknown["backend_capabilities"] is None
+    assert unknown["rendering_identity"] is None
+
+
+@pytest.mark.parametrize("installed,matched", [(None, None), ("0.4.3", False), ("1.4.4", True)])
+def test_doctor_reports_missing_or_mismatched_engine_without_qualification(
+    monkeypatch, installed, matched
+):
+    from cloth_fling import provenance
+
+    monkeypatch.setattr(provenance, "package_versions", lambda: {"genesis-world": installed})
+    result = cli.doctor_report()
+    assert result["expected_engine_version"] == "1.4.4"
+    assert result["engine_version_matches_pin"] is matched
+    assert result["simulation_probed"] is False
+    runtime = provenance.runtime_provenance()
+    assert runtime["engine_version"] == installed
+    assert runtime["engine_version_source"] == "installed_distribution_metadata"
+
+
 @pytest.mark.parametrize(
     "passed,half_dt,exit_code", [(True, True, 0), (False, True, 1), (True, False, 1)]
 )

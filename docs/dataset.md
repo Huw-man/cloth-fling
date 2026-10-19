@@ -1,8 +1,32 @@
-# Stage 2 collection and dataset format
+# Collection and dataset format
 
 This is a local, simulation-only pipeline. Successful verification establishes storage and
 episode-chain integrity. It does not qualify reset physics, retained grasp, fling behavior,
 contact grasping, or a learned policy. No training or release is included.
+
+## Genesis 1.4.4 compatibility boundary
+
+Package 0.2.0 upgrades the simulator; it does not rewrite historical datasets. Parquet,
+PNG and safe NPZ/JSON support files remain readable with the base install, without
+Genesis, Torch or video encoders. `dataset verify` and `replay --inspect` check saved
+artifacts without simulating. Their success is storage/inspection evidence only.
+
+Physical snapshots move to schema 2 with engine identity. Reading an old state is
+permitted; restoring it under 1.4.4 is not. Saved-reset collection must pass the backend's
+schema, engine, topology and physics-configuration validation before physical writes.
+Do not relabel a schema-1 snapshot or settle it silently to make it compatible. An explicit
+future geometry derivation would need parent identity and fresh qualification.
+
+New evidence records installed engine/dependency identity separately from source snapshot
+identity, the contact profile, rendering backend and backend-reported capabilities.
+Unknown capabilities remain unknown rather than inheriting a historical pass. Replay of
+historical geometry requires an explicit rendering-only path and compatible topology;
+original images and source engine metadata stay distinct from newly rendered frames.
+
+Collection and primitive campaigns remain paused during migration. The interfaces below
+document storage and lifecycle behavior, not permission to resume. All Genesis 0.4.3
+contact, rendering and experimental laydown outcomes are historical. See the
+[migration record](genesis144-migration.md) and [archived results](milestone2-results.md).
 
 ## Collection API
 
@@ -255,28 +279,15 @@ appearance by default, while `--legacy-appearance` reproduces the old appearance
 its hash are unaffected by appearance selection. Direct library/backend callers
 retain legacy appearance with `None`.
 
-```bash
-uv sync --locked --extra sim --extra video --extra dev
-uv run --locked --extra sim --extra video cloth-fling diagnose \
-  --config configs/contact-native-v1.json --appearance-config configs/appearance-matte.json \
-  --reset-dir runs/m2-reset-11 --primitive-config configs/primitive-default.json --record-video \
-  --output runs/diagnostic-clearance
-uv run --locked --extra sim --extra video cloth-fling collect \
-  --config configs/contact-native-v1.json --appearance-config configs/appearance-matte.json \
-  --reset-dir runs/m2-reset-11 --primitive-config configs/primitive-full-lift-laydown-v2.json \
-  --episodes 1 --max-actions 2 --primitive laydown --record-video --output runs/two-actions
-```
-
-The saved `runs/m2-reset-11` fixture must be generated under this native contact profile,
-as in the [README quickstart](../README.md#milestone-2-quickstart); never restore a legacy
-physics snapshot directly into the new profile. These commands are examples for bounded
-runs **after** the contact and primitive
-acceptance gates in [milestone 2](milestone2.md) pass. CLI `diagnose` returns nonzero
-for invalid execution; `collect` returns nonzero for invalid actions or reset failures.
-Neither a zero exit status nor a valid dataset is behavior qualification.
-`configs/primitive-legacy.json` explicitly disables clearance for controlled motion
-comparison; `configs/primitive-default.json` enables the approved 20 mm / 100 ms gate,
-50 mm increments and 750 mm cap. A legacy comparison is never clearance qualification.
+Historical milestone-2 recording used `configs/contact-native-v1.json` and saved
+Genesis 0.4.3 resets. Those are archival inputs; do not execute the old diagnostic or
+collection commands with the 1.4.4 environment. New native-v2 resets and all physical
+acceptance gates must be established independently before collection resumes.
+CLI `diagnose` returns nonzero for invalid execution; `collect` returns nonzero for
+invalid actions or reset failures. Neither a zero exit nor a valid dataset qualifies
+behavior. `configs/primitive-legacy.json` disables clearance for historical comparison;
+`configs/primitive-default.json` retains the 20 mm / 100 ms clearance gate, 50 mm
+increments and 750 mm cap, all requiring new-runtime validation.
 
 Recording uses native execution captures labeled `native_render_capture`. Each actual
 global episode/action ID starts a separate recorder under
@@ -311,15 +322,18 @@ not implicitly reset it. Local outputs should live under ignored `runs/`.
 
 ## Contact qualification and replay commands
 
+Offline inspection remains available during migration:
+
 ```bash
-uv run --locked --extra sim cloth-fling diagnose-contact \
-  --config configs/contact-native-v1.json --output runs/contact-native
 uv run --locked cloth-fling replay runs/old-dataset --inspect
-uv run --locked --extra sim --extra video cloth-fling replay runs/old-dataset \
-  --output runs/old-dataset-replay --appearance-config configs/appearance-matte.json
-uv run --locked --extra sim --extra video cloth-fling replay runs/old-diagnostic/diagnostic.json \
-  --output runs/old-diagnostic-replay --legacy-appearance
+uv run --locked cloth-fling dataset verify runs/old-dataset
 ```
+
+The preferred upgraded contact configuration is `configs/contact-native-v2.json`.
+Contact probes require integrated runtime code and the coordinator's exclusive GPU lease;
+see [runtime checks](runtime.md). Historical rendered replay requires an explicit
+recorded-geometry-only path from the rendering integration, rather than restoring old
+physical snapshots. CLI options and capability limits are in [viewer docs](viewer.md).
 
 `diagnose-contact` accepts separate physics JSON, `--duration-s` in [0.3, 2] (default
 0.6), and performs the half-timestep comparison by default. A failed physical gate
@@ -358,7 +372,7 @@ guards unchanged. It does not configure physics or appearance. The dataclass/ref
 default remains 0.12 m, and `configs/primitive-legacy.json` remains explicit milestone 1
 reproduction with clearance disabled.
 
-The coordinator's interim native-contact checks with full clearance reported:
+The coordinator's historical **Genesis 0.4.3** native-v1 checks with full clearance reported:
 
 | Fixed fixture | Final coverage | Interpretation |
 | --- | --- | --- |
@@ -366,7 +380,8 @@ The coordinator's interim native-contact checks with full clearance reported:
 | Frozen seed 17 fixture, reviewed pair | Approximately 0.9999 | Bounded laydown pass, low strain |
 | Seed 23 fixture, old grasp pair | Initial lift fails | No completed laydown pass |
 
-These observations cover two verified fixed cases. They do not establish a universally
+These historical observations cover two verified fixed cases; the 0.30 m profile is
+unqualified on Genesis 1.4.4. They do not establish a universally
 successful profile, a qualified grasp selector, a reset distribution, repeated-action
 success or broad-collection readiness. Dynamic fling remains unqualified. A freshly
 generated reset with the same seed and an automatically selected pair is not the frozen

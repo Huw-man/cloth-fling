@@ -1,173 +1,99 @@
 # cloth-fling
 
-A small robotless cloth unfolding project: overhead RGB, two explicitly assisted
-grasp points, deterministic motion primitives, and repeated-action episode datasets.
-It is inspired by [FlingBot](https://proceedings.mlr.press/v164/ha22a.html).
+Robotless cloth unfolding with overhead RGB, two explicitly assisted grasp points,
+deterministic motion primitives, and local Parquet/image/state datasets. Inspired by
+[FlingBot](https://proceedings.mlr.press/v164/ha22a.html).
 
-Milestone 2 adds native table-contact qualification, whole-cloth clearance and inspectable
-execution to the simulation and collection pipeline. A working pipeline does not establish
-that the fling primitive improves coverage or that a policy generalizes. There are no
-articulated arms, IK, finger closure, physical pinch qualification, trained models, cloud
-services or published dataset dependencies in this milestone.
+## Install and check Genesis 1.4.4
 
-## Install
+Version 0.2.0 pins **Genesis 1.4.4**, the latest stable release checked on 2026-10-19,
+and starts a new engine/snapshot compatibility boundary. See the
+[migration record](docs/genesis144-migration.md) for upstream identity, wheel hash,
+locked versions and validation limits. Historical Genesis 0.4.3 results do not qualify
+this runtime. Cloth-motion campaigns and collection remain paused during migration.
 
-Use Python 3.11 or 3.12 and [uv](https://docs.astral.sh/uv/). Commands below run from
-the repository root. Dependencies are pinned by `uv.lock`.
+Use Python 3.11 or 3.12 and [uv](https://docs.astral.sh/uv/). Run from the repository root:
 
 ```bash
+export UV_CACHE_DIR=/tmp/cloth-fling-uv-cache
 uv sync --locked --extra dev
 uv run --locked cloth-fling doctor
 uv run --locked --extra dev pytest -m 'not gpu'
 ```
 
-For simulation, use Linux with a CUDA-capable NVIDIA GPU and a driver compatible
-with CUDA 12.8. The `sim` extra explicitly includes CUDA 12.8 Torch wheels; Genesis
-does not declare Torch itself. The intended development target is one RTX 5080.
-Headless rendering also requires a working EGL/OpenGL driver runtime; `doctor --probe`
-checks scene construction and actual RGB/depth rendering in the selected environment.
+The base install reads historical datasets without Genesis, Torch or video packages:
 
 ```bash
-uv sync --locked --extra sim --extra video --extra dev
-uv run --locked --extra sim cloth-fling doctor --probe \
-  --config configs/contact-native-v1.json --appearance-config configs/appearance-matte.json
+uv run --locked cloth-fling dataset verify runs/saved-dataset
+uv run --locked cloth-fling replay runs/saved-diagnostic --inspect
 ```
 
-If the default uv cache is read-only, set `UV_CACHE_DIR=/tmp/cloth-fling-uv-cache`.
-Sandboxed GPU visibility can differ from host visibility. Check `doctor` in the same
-execution context that will run simulation; do not interpret package installation
-or `nvidia-smi` alone as a successful physics/rendering test.
-
-## Milestone 2 quickstart
-
-For new experiments, explicitly select `configs/contact-native-v1.json` and matte
-appearance. `configs/primitive-default.json` remains the 0.12 m reference motion;
-`configs/primitive-full-lift-laydown-v2.json` is the preferred experimental laydown
-profile for bounded follow-up checks, with 0.30 m laydown and the same 0.06 m drag. This retains the 50 x 50 cm synthetic cloth and uses
-native table friction bounded by normal contact impulses, with provisional static/kinetic coefficients
-0.40/0.30. These are engineering priors, not calibrated terry/desk measurements; see
-[contact qualification](docs/contact.md). CLI rendering defaults to matte, and the explicit
-appearance JSON below records the intended settings independently of physics.
-`SceneConfig()` and `load_config(None)` retain legacy physics for compatibility, so new
-runs must supply the native profile explicitly.
-
-Run the bounded contact gate first. A nonzero exit or unresolved normal-energy injection
-blocks dependent primitive qualification and collection. Preserve the failed output.
+For simulation dependencies, select the `sim` extra. Torch comes explicitly from the
+CUDA 12.8 index for the RTX 5080 target; Genesis does not declare Torch itself.
+Linux simulation also needs compatible NVIDIA and EGL/OpenGL drivers.
 
 ```bash
-uv run --locked --extra sim cloth-fling diagnose-contact \
-  --config configs/contact-native-v1.json --output runs/m2-contact-native
+uv sync --locked --extra sim --extra dev --extra video
+uv run --locked --extra sim --extra dev --extra video cloth-fling doctor
 ```
 
-After contact passes, generate a **fresh native-profile reset**, then compare both
-primitives from that same saved fixture. Do not restore a milestone 1/legacy snapshot
-under changed physics. Cross-profile comparisons require the coordinator's explicit
-geometry derivation, parent hash, one settling pass and within-profile exact restoration.
-Use fresh output directories for each run.
+During migration, set `UV_PROJECT_ENVIRONMENT` to the coordinator-provided shared
+migration environment before syncing or running. Preserve the historical root `.venv`
+until integration. `doctor` reads package metadata and GPU visibility without importing
+or initializing Genesis/Torch. Installation and GPU visibility alone are not physics
+or rendering qualification. See [runtime checks](docs/runtime.md) for the separately
+leased, bounded upgraded-runtime probe.
 
-```bash
-uv run --locked --extra sim cloth-fling resets \
-  --config configs/contact-native-v1.json --appearance-config configs/appearance-matte.json \
-  --kind fold --seed 11 --output runs/m2-reset-11
+## Migration gates
 
-uv run --locked --extra sim --extra video cloth-fling diagnose \
-  --config configs/contact-native-v1.json --appearance-config configs/appearance-matte.json \
-  --primitive-config configs/primitive-default.json --reset-dir runs/m2-reset-11 \
-  --record-video --output runs/m2-diagnostic-11
-```
+New CLI scenes use the upgraded `native_coulomb_v2` profile and
+`configs/contact-native-v2.json` after the runtime/contact integration is applied.
+The v1 contact profiles remain archival Genesis 0.4.3 configurations. Do not use an
+old contact pass or old snapshot as qualification under Genesis 1.4.4.
 
-Both primitives lift initially to 0.30 m, tauten, then raise the grasps further as needed
-in bounded 0.05 m increments up to 0.75 m. All cloth surface must clear the table by 0.020 m for 0.100 s
-before placement; fling swing and pullback retain that clearance until intentional lowering.
-Laydown then places diagonally, drags and releases. Fling retains both grasps through its
-swing, pullback and placement, releasing near the table. Motion/settling settings remain
-separate from scene physics and appearance; full executed settings stay in evidence.
+The upgraded legacy PBD coupling still omits tangential cloth/rigid friction; rigid
+contact improvements in upstream release notes do not establish cloth-contact fidelity.
+The guarded v2 extension needs new contact qualification before any dependent primitive
+campaign. Do not relax materials, damping or acceptance gates to obtain a pass.
+Dependencies and CPU interface checks precede coordinator-assigned, exclusive RTX 5080
+probes. There is no GPU lease implied by installation or by these example commands.
 
-The experimental laydown profile contains every `PrimitiveConfig` field and changes only
-`laydown_distance_m` from 0.12 m to 0.30 m relative to the reference profile. All other
-distances, physics, clearance, strain, speed, acceleration and timeout guards are unchanged.
-The dataclass/reference defaults and explicit milestone 1 legacy profile remain unchanged.
+Snapshots move to schema 2 with engine identity. Old physical states must be rejected
+for restore. Historical Parquet, RGB, NPZ/JSON and offline replay inspection remain
+readable. Historical geometry can be rendered only through an explicit render-only
+path with compatible topology; this cannot establish physical continuation.
 
-Interim coordinator checks of the 0.30 m laydown plus 0.06 m drag, with full clearance,
-reported final coverage about 0.99995 on the seed 11 fixture and 0.9999 on the frozen seed 17
-fixture, with low strain. These are two fixed-case passes. Seed 23 with the old grasp pair
-fails during the initial lift; dynamic fling remains unqualified. The profile does not
-qualify arbitrary grasps, reset distributions, repeated-action behavior or broad collection.
-A fresh reset with the same seed does not reproduce the frozen fixture and reviewed pair.
-See [the experimental profile and evidence limits](docs/dataset.md#experimental-full-lift-laydown-profile).
+## Historical results and experimental profiles
 
-The single reference diagnostic above is an inspection example, not the complete acceptance gate.
-Before collection, complete the [approved milestone 2 comparisons](docs/milestone2.md):
-legacy versus clearance motion for both primitives on the original favorable fixture and
-predetermined seeds 17/23, exact restoration within each profile, clearance on every accepted
-action, and at least 95% final coverage on the original favorable laydown fixture. A fresh
-fold reset with seed 11 does not replace that favorable fixture. Only after these gates pass,
-run the bounded two-action evolving-cloth episode:
+[Milestone 1](docs/milestone1-results.md) and
+[milestone 2](docs/milestone2-results.md) results are **historical Genesis 0.4.3 evidence**.
+The previous native-v1 contact measurements, mesh/depth checks, exact restores and
+fixed-fixture laydown results do not transfer to 1.4.4. Their reports and failed outputs
+remain intact for offline inspection.
 
-```bash
-uv run --locked --extra sim --extra video cloth-fling collect \
-  --config configs/contact-native-v1.json --appearance-config configs/appearance-matte.json \
-  --primitive-config configs/primitive-full-lift-laydown-v2.json --reset-dir runs/m2-reset-11 \
-  --episodes 1 --max-actions 2 --primitive laydown --record-video --output runs/m2-episodes-11
-
-uv run --locked cloth-fling dataset verify runs/m2-episodes-11
-```
-
-Within an episode the collector releases, settles, observes and chooses again on the evolved
-cloth, without resetting between valid actions. An invalid attempt is recorded and ends that
-episode; resets occur at episode boundaries. Valid negative coverage gains are retained.
-Dataset verification establishes storage integrity, not physical or behavior qualification.
-`uniform_valid` is the default selection baseline; `--policy geometry_guided` selects the
-separate privileged geometry baseline. No learned policy or broad collection is included.
-
-## Milestone 1 reproduction
-
-Use these explicit legacy settings to reproduce the first milestone's physics, appearance
-and motion configuration with the current package. `configs/cloth50.json` selects the old
-resting-load table-friction adapter, `--legacy-appearance` restores the original table,
-and `configs/primitive-legacy.json` disables the new clearance phase. Historical evidence
-and its limits remain in [milestone 1 results](docs/milestone1-results.md) and
-[runtime qualification](docs/runtime.md). These commands do not qualify milestone 2.
-
-```bash
-uv run --locked --extra sim cloth-fling resets \
-  --config configs/cloth50.json --legacy-appearance \
-  --kind fold --seed 11 --output runs/m1-reset-11
-
-uv run --locked --extra sim cloth-fling diagnose \
-  --config configs/cloth50.json --legacy-appearance \
-  --primitive-config configs/primitive-legacy.json --reset-dir runs/m1-reset-11 \
-  --output runs/m1-diagnostic-11
-
-uv run --locked --extra sim cloth-fling collect \
-  --config configs/cloth50.json --legacy-appearance \
-  --primitive-config configs/primitive-legacy.json --reset-dir runs/m1-reset-11 \
-  --episodes 1 --max-actions 3 --primitive laydown --output runs/m1-episodes-11
-
-uv run --locked cloth-fling dataset verify runs/m1-episodes-11
-```
-
-CLI reset and collection defaults use `fold`; single-point `drop` preparation is available
-explicitly. Reset distributions remain unqualified. Failures are recorded without falling
-back to a different reset. Use `--primitive fling` to inspect the retained-grasp candidate.
+`configs/primitive-full-lift-laydown-v2.json` retains an experimental 0.30 m laydown and
+0.06 m drag, compared with the 0.12 m reference. Its old fixed-case outcomes are described
+in the [dataset notes](docs/dataset.md#experimental-full-lift-laydown-profile).
+It is unqualified on the new engine. Dynamic fling, reset distributions, grasp selection
+and repeated-action behavior also require separate evidence; none is certified by the
+migration or by successful dataset verification. Old profile names are configuration
+history, not a command to reproduce old physics in the new runtime.
 
 ## Boundaries and artifacts
 
-- Learned-policy input is RGB only. Depth, mesh state, attachment IDs, trajectories,
-  and coverage diagnostics are privileged execution/evaluation support.
-- Coordinates are world metres with z up, and image pixels `(u, v)` with top-left
-  origin, u right, v down. Camera projection and pixel-center convention are saved.
-- Local datasets use Parquet action rows, PNG RGB, and NPZ/JSON supporting state.
-  Detailed trajectories and geometry stay outside the policy observation.
-- `runs/` is ignored. Unfinished runs and debugging output remain local.
-- Data readers and verification do not import or initialize Genesis or Torch.
-- Future GitHub code, Hugging Face datasets, and Hugging Face models will be separate
-  releases with immutable revisions, checksums, cards, and evaluation provenance.
+- Learned-policy input is RGB only. Depth, geometry, attachments, trajectories and
+  coverage are privileged execution/evaluation artifacts.
+- Units are world metres with z up; pixels `(u, v)` start top-left, u right and v down.
+- Motion commands affect attached particles only. Release retains velocity. Explicit
+  contact physics is separate from control.
+- Valid evolving-cloth actions have no intervening reset; invalid attempts and terminal
+  observations are recorded, and valid negative coverage gains are retained.
+- Local datasets store Parquet rows, PNG RGB and NPZ/JSON supporting state. `runs/` is ignored.
+- There are no arms, IK, physical pinch qualification or trained models. Further primitive
+  campaigns, broad collection, training, hardware, cloud and publication remain out of scope.
 
-See [runtime qualification](docs/runtime.md), [primitive diagnostics](docs/primitives.md),
-and [dataset format](docs/dataset.md) for implementation details and measured limits.
-The [first milestone results](docs/milestone1-results.md) record the verified episode,
-matched primitive comparison, and remaining qualification work.
+See [runtime](docs/runtime.md), [dataset format](docs/dataset.md),
+[primitive diagnostics](docs/primitives.md) and [viewer/replay](docs/viewer.md).
 
 ## Development
 
@@ -176,37 +102,5 @@ uv run --locked --extra dev ruff check src tests
 uv run --locked --extra dev pytest -m 'not gpu'
 ```
 
-GPU tests are opt-in; follow the runtime document for their qualification command.
-Use separate reset families/seeds for development and held-out evaluation. Do not
-split related episode frames across train and test. Training, model release,
-cross-cloth claims, and physical robot adaptation are later milestones.
-
-## Milestone 2 inspection
-
-The [approved milestone 2 gates](docs/milestone2.md) add native-contact qualification,
-whole-cloth clearance, independent matte table appearance, visible debug grasps and
-optional execution videos. CLI simulation commands and `cloth-fling replay` default
-to matte. Use `--legacy-appearance` for old appearance reproduction, or
-`--appearance-config configs/appearance-matte.json` for render-only settings; physics
-still comes exclusively from `--config`. Direct backend callers retain the legacy
-appearance default.
-
-```bash
-# Inspect saved data offline; no simulator or video packages needed.
-uv run --locked cloth-fling replay runs/m2-diagnostic-11 --inspect
-
-# Reconstructed saved-trajectory replay (fresh output outside the source).
-uv run --locked --extra sim --extra video cloth-fling replay runs/m2-diagnostic-11 \
-  --output runs/m2-diagnostic-11-replay
-```
-
-Install the optional `video` extra for MP4 encoding. Add `--record-video` to a bounded
-`diagnose` or `collect` command for native captures during execution. Recording errors
-invalidate and preserve the attempt; no action is retried. Video files stay outside
-the dataset manifest under `output/video/`, with relative filenames and hashes in
-reports/evidence. Failed contact gates block dependent qualification; successful
-storage or rendering alone is not a physical or behavior pass. See
-[recording, provenance and replay](docs/dataset.md#milestone-2-evidence-and-recording)
-for interfaces, limitations and comparison rules. Final host GPU evidence belongs to
-the coordinator; broad collection, training, cloud, publication and hardware work
-remain out of scope.
+GPU checks require the coordinator's exclusive lease. Package 0.2.0 is a local version
+boundary; this migration creates no tag or published release.

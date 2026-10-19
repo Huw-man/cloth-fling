@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.metadata
 import json
 import platform
 import subprocess
@@ -18,7 +17,7 @@ from cloth_fling.contracts import SceneConfig
 
 def load_config(path: str | None) -> SceneConfig:
     if path is None:
-        return SceneConfig()
+        return SceneConfig(contact_profile="native_coulomb_v2")
     data = json.loads(Path(path).read_text())
     if not isinstance(data, dict):
         raise ValueError("scene configuration must be a JSON object")
@@ -29,12 +28,9 @@ def load_config(path: str | None) -> SceneConfig:
 
 
 def doctor_report() -> dict[str, Any]:
-    packages = {}
-    for name in ("cloth-fling", "genesis-world", "torch", "numpy", "pyarrow", "pillow"):
-        try:
-            packages[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            packages[name] = None
+    from cloth_fling.provenance import package_versions
+
+    packages = package_versions()
     try:
         probe = subprocess.run(
             ["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"],
@@ -55,6 +51,10 @@ def doctor_report() -> dict[str, Any]:
         "python": platform.python_version(),
         "platform": platform.platform(),
         "packages": packages,
+        "expected_engine_version": "1.4.4",
+        "engine_version_matches_pin": (
+            packages["genesis-world"] == "1.4.4" if packages["genesis-world"] else None
+        ),
         "gpu": gpu,
         "simulation_probed": False,
     }
@@ -148,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--primitive", choices=("laydown", "fling"), default="laydown")
 
     for command in (doctor, resets, diagnose, collect):
-        command.add_argument("--config", help="Scene JSON overrides")
+        command.add_argument("--config", help="Scene JSON; default: native_coulomb_v2")
         command.add_argument("--backend", choices=("gpu", "cpu"), default="gpu")
         _appearance_options(command)
 
@@ -250,6 +250,10 @@ def main(argv: list[str] | None = None) -> int:
                         "coverage": list(env.coverage()),
                         "attached_ids": list(env.attached_ids),
                     }
+                    from cloth_fling.provenance import config_provenance, runtime_provenance
+
+                    report["provenance"] = config_provenance(env, appearance=load_appearance(args))
+                    report["runtime_provenance"] = runtime_provenance()
                 finally:
                     env.close()
             print(json.dumps(report, indent=2, allow_nan=False))

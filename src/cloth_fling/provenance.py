@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import platform
 import subprocess
@@ -11,10 +12,29 @@ from pathlib import Path
 from typing import Any
 
 
+def package_versions() -> dict[str, str | None]:
+    """Distribution identity only; never imports the packages being inspected."""
+    packages = {}
+    for name in (
+        "cloth-fling", "genesis-world", "quadrants", "torch", "trimesh", "numpy",
+        "pyarrow", "pillow", "pydantic", "gs-madrona", "av", "imageio", "imageio-ffmpeg",
+    ):
+        try:
+            packages[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            packages[name] = None
+    return packages
+
+
 def runtime_provenance() -> dict[str, Any]:
     root = Path(__file__).resolve().parents[2]
+    packages = package_versions()
     result: dict[str, Any] = {
         "platform": platform.platform(),
+        "python": platform.python_version(),
+        "packages": packages,
+        "engine_version": packages["genesis-world"],
+        "engine_version_source": "installed_distribution_metadata",
         "code_revision": None,
         "code_dirty": None,
         "dependency_lock_sha256": None,
@@ -85,6 +105,21 @@ def config_provenance(env, *, appearance=None, primitive_config=None, reset_sour
         return hashlib.sha256(canonical.encode()).hexdigest()
 
     return {
+        "runtime_identity": document(getattr(env, "runtime_identity", None)),
+        "backend_capabilities": document(getattr(env, "capabilities", None)),
+        "rendering_identity": document(getattr(env, "rendering_identity", None)),
+        "rendering_capabilities": document(getattr(env, "rendering_capabilities", None)),
+        "contact_profile": getattr(env.config, "contact_profile", None),
+        "source_snapshot_identity": (
+            {
+                key: reset_source.get(key)
+                for key in (
+                    "schema_version", "engine", "engine_version", "runtime_identity_json",
+                    "config_json", "config_hash",
+                )
+            }
+            if reset_source is not None else None
+        ),
         "physics_config": physics,
         "physics_config_sha256": config_hash(physics),
         "appearance_config": rendering,

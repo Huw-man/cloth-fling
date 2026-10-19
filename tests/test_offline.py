@@ -15,7 +15,7 @@ import json, sys
 from cloth_fling.cli import doctor_report, load_config
 from cloth_fling.contracts import SceneConfig
 from cloth_fling.provenance import runtime_provenance
-assert load_config(None) == SceneConfig()
+assert load_config(None) == SceneConfig(contact_profile='native_coulomb_v2')
 report = doctor_report()
 assert runtime_provenance()['torch_cuda_version'] is None
 assert not report['simulation_probed']
@@ -26,7 +26,7 @@ print(json.dumps(report))
     result = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     )
-    assert json.loads(result.stdout)["version"] == "0.1.0"
+    assert json.loads(result.stdout)["version"] == "0.2.0"
 
 
 def test_example_configuration_is_portable():
@@ -74,3 +74,36 @@ def test_cli_records_reset_failure_but_exits_nonzero(monkeypatch, tmp_path, caps
     assert cli.main(["collect", "--output", str(tmp_path)]) == 1
     assert json.loads(capsys.readouterr().out)["reset_failures"] == 1
     assert closed == [True]
+
+
+def test_historical_dataset_and_replay_inspection_without_simulator(tmp_path):
+    from test_collection_pipeline import FakeEnv, execute, select
+
+    from cloth_fling.collection import collect_episodes
+
+    env = FakeEnv()
+    snapshot = env.snapshot
+    env.snapshot = lambda: {
+        **snapshot(),
+        "schema_version": 1,
+        "config_json": json.dumps(env.config.to_dict()),
+    }
+    collect_episodes(env, tmp_path, max_actions=1, selector=select, executor=execute)
+    code = """
+import importlib.abc, sys
+class NoSimulator(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'genesis', 'torch'}:
+            raise AssertionError(f'offline operation imported {fullname}')
+sys.meta_path.insert(0, NoSimulator())
+from cloth_fling.cli import main
+from cloth_fling.data import read_support, read_transitions
+root = sys.argv[1]
+assert main(['dataset', 'verify', root]) == 0
+assert main(['replay', root, '--inspect']) == 0
+rows = read_transitions(root).to_pylist()
+assert rows[0]['reward'] < 0
+assert read_support(root, rows[0]['final_state_path'])['schema_version'] == 1
+assert 'genesis' not in sys.modules and 'torch' not in sys.modules
+"""
+    subprocess.run([sys.executable, "-c", code, str(tmp_path)], check=True)

@@ -1,10 +1,62 @@
 # Genesis runtime and simulation boundary
 
-The installed simulator is Genesis 0.4.3, pinned with CUDA 12.8 Torch in `uv.lock`.
-The planning source revision is recorded in `milestone.md`; packaged APIs were checked
-again during implementation. Importing backend/data/policy-support modules does not
-initialize Genesis or Torch. GPU construction explicitly requests CUDA and rejects a
-silent CPU fallback. Host validation targets the RTX 5080, 16 GB, driver 595.91.07.
+## Genesis 1.4.4 migration
+
+Package 0.2.0 pins Genesis 1.4.4 and CUDA 12.8 Torch in `uv.lock`. Python 3.11 and
+3.12 remain supported; the shared migration target is Python 3.12.13. The exact
+[release and dependency record](genesis144-migration.md) separates installation,
+offline checks and subsequent runtime/contact/rendering qualification.
+
+Importing the package, CLI, provenance or offline dataset readers does not import or
+initialize Genesis/Torch. `cloth-fling doctor` reports installed distribution versions
+and GPU visibility without building a scene. The shared migration environment is
+separate from the retained Genesis 0.4.3 root environment. Other worktrees must select
+their own source through `PYTHONPATH` when using that shared interpreter.
+
+```bash
+export UV_CACHE_DIR=/tmp/cloth-fling-uv-cache
+uv sync --locked --extra sim --extra dev --extra video
+uv run --locked --extra sim --extra dev --extra video cloth-fling doctor
+uv run --locked --extra dev pytest -m 'not gpu'
+```
+
+The host target remains NVIDIA RTX 5080, 16 GB. GPU construction requests CUDA explicitly
+and rejects silent CPU fallback. Sandbox device masking is not evidence of a host failure.
+A compatible driver and working EGL/OpenGL runtime are required for headless rendering.
+For sandboxed import checks with a shared read-only environment, set
+`NUMBA_CACHE_DIR=/tmp/cloth-fling-numba-cache` and
+`MPLCONFIGDIR=/tmp/cloth-fling-matplotlib` so dependency caches are writable.
+
+Only after runtime/contact and rendering code is integrated, CPU readiness is reviewed,
+and the coordinator grants the exclusive GPU lease, the bounded scene/render probe is:
+
+```bash
+PYOPENGL_PLATFORM=egl uv run --locked --extra sim cloth-fling doctor --probe \
+  --config configs/contact-native-v2.json --appearance-config configs/appearance-matte.json
+```
+
+This command is a construction/render smoke, not contact or behavior qualification.
+Native-v2 contact acceptance must precede any dependent primitive qualification.
+No primitive campaigns or collection are authorized by this migration document.
+
+The preferred upgraded CLI profile is `native_coulomb_v2`, with the runtime agent's
+`configs/contact-native-v2.json`. Historical v1 profiles keep their original identity.
+The 1.4.4 legacy PBD/rigid source still omits tangential friction. The v2 adapter needs
+a source-guarded review and fresh evidence; adding 1.4.4 to an old private-API version
+whitelist is insufficient. Rigid contact release notes are not cloth friction evidence.
+
+Schema-2 snapshots record the engine version, and physical restore must reject historical
+schema-1 / Genesis 0.4.3 state. Dataset reading and `replay --inspect` remain offline and
+compatible with historical artifacts. Rendering historical geometry requires an explicit
+render-only route, topology validation, source engine identity and separate rendering
+capabilities. Never restore old physics silently to make a replay image.
+
+## Historical Genesis 0.4.3 implementation notes
+
+Everything below describes the previous implementation and its measurements. None of
+its mesh counts, render-error bounds, restoration checks or contact results establishes
+a pass under Genesis 1.4.4. See [milestone 2 historical results](milestone2-results.md).
+The current code must be rechecked against the upgraded runtime before simulation resumes.
 
 ## Scene and physical assumptions
 
@@ -15,10 +67,10 @@ bending compliance 1e-5, and static/kinetic friction coefficients 0.15/0.15. Thi
 is not calibrated to a particular physical towel.
 
 Outer physics dt is 2 ms with four substeps. `max_stretch_solver_iterations` is explicit;
-the current configuration uses 64. Bounded frozen-state lift checks showed substantial
+the historical configuration used 64. Bounded frozen-state lift checks showed substantial
 iteration sensitivity, so Genesis's default four sweeps were inadequate for this slice.
 More iterations alone do not establish physical fidelity or convergence of every phase.
-Genesis currently ties 1 cm remeshing spacing to a 1 cm particle collision diameter
+Genesis 0.4.3 tied 1 cm remeshing spacing to a 1 cm particle collision diameter
 (5 mm support radius). This is a coarse contact thickness, not a measured fabric
 thickness. Near-table placement uses 20 mm; the former 8 mm target could squeeze a
 held layer into the lower layer's collision envelope. The hard 10% strain guard and
@@ -96,16 +148,3 @@ config/calibration identity, simulated time, reset metadata and a content hash. 
 validates before writes, rejects attached snapshots and mismatched configurations, clears
 current attachments, and verifies exact readback. No pickle is required. GPU preparation
 may differ at floating point precision; replay uses saved actual state, not seed equality.
-
-## Validation
-
-```bash
-uv run --locked --extra dev pytest -m 'not gpu'
-CLOTH_FLING_RUN_GPU=1 PYOPENGL_PLATFORM=egl \
-  uv run --locked --extra sim --extra dev pytest -q -s tests/test_sim_gpu.py
-```
-
-GPU use must be serial/exclusive. Sandbox device masking differs from host visibility.
-See `milestone1-results.md` for integrated measurements, artifact locations, qualification
-limits and remaining primitive/reset risks. Runtime and dataset integrity are distinct
-from demonstrated policy improvement or physical-grasp qualification.
