@@ -1,5 +1,26 @@
 # Cloth-fling first milestone
 
+## Active milestone 2
+
+The user approved implementation of visible debug grasps, independently configured
+matte desk appearance, native table-contact friction qualification, and whole-cloth
+clearance before placement. The approved scope is recorded in `docs/milestone2.md`.
+This ownership supersedes the historical stage ownership below:
+
+- Contact agent: backend/contact/native-contact, contact diagnostics, SceneConfig
+  contact fields, contact profiles/tests and contact documentation.
+- Visual agent: appearance/debug rendering/replay modules, their tests and viewer docs.
+- Clearance agent: primitive execution, clearance/callback tests and primitive docs.
+- Evidence agent: CLI, collection/diagnostic recording integration, provenance,
+  packaging/video dependencies, integration tests and user documentation.
+- Coordinator: integration review, this file, milestone reports, bounded final host checks.
+
+Use separate Herdr worktrees and commits. GPU access is a coordinator-assigned lease:
+one scene at a time. Native contact qualification precedes primitive qualification;
+stop dependent campaigns when its physical acceptance gate fails. Preserve failed
+evidence. Do not silently change damping, thresholds or material values to pass.
+No training, broad collection, publication, paid compute or hardware execution.
+
 Build a standalone Python package, robotless Genesis scene, deterministic assisted
 attachment, retained-grasp laydown/fling primitives, bounded repeated-action collection,
 and Parquet/image/state dataset tools. Training/model releases and publication are later.
