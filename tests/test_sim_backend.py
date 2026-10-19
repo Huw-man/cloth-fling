@@ -69,6 +69,7 @@ def backend():
     b.cloth = Cloth(b.rest_positions + [0, 0, .05])
     b._closed = False
     b._observation = None
+    b._render_buffers_ready = False
     b._targets = None
     b.attached_ids = ()
     b.simulated_time = 1.0
@@ -196,6 +197,31 @@ def test_observation_array_isolation_and_content_identity(backend):
     b.cloth.p[0, 0] += .01
     b._dirty()
     assert b.observe().observation_id != two.observation_id
+
+
+def test_renderer_warms_buffers_and_forces_same_step_refresh_without_physics(backend):
+    b = backend
+    calls = []
+    render = b.camera.render
+
+    def capture(**options):
+        calls.append(options)
+        return render(**options)
+
+    def forbidden_step():
+        pytest.fail("render/restore must not step physics")
+
+    b.camera.render = capture
+    b.scene.step = forbidden_step
+    state = b.snapshot()
+    b.observe()
+    assert len(calls) == 2  # First draw allocates buffers; second uploads dynamic vertices.
+    b.observe()
+    assert len(calls) == 2  # Cached observation needs no redraw.
+    b.restore(state)
+    assert len(calls) == 3  # A restore at the same step forces a fresh dynamic upload.
+    assert all(call["force_render"] and not call["antialiasing"] for call in calls)
+    assert b.snapshot()["state_hash"] == state["state_hash"]
 
 
 @pytest.mark.parametrize("failure", ["timeout", "escaped"])

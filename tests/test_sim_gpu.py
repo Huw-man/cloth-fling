@@ -8,7 +8,8 @@ import numpy as np
 import pytest
 
 from cloth_fling.contracts import SceneConfig
-from cloth_fling.sim.backend import GenesisBackend, InvalidResetError
+from cloth_fling.sim.backend import GenesisBackend, InvalidResetError, _state_hash
+from cloth_fling.sim.coverage import CoverageGrid
 from cloth_fling.sim.mesh import pixel_ray, ray_surface_hit
 
 pytestmark = [pytest.mark.gpu,
@@ -21,6 +22,122 @@ def pixels_for(points, calibration):
     camera = np.c_[points, np.ones(len(points))] @ pose.T
     uvz = camera[:, :3] @ np.asarray(calibration["intrinsics"]).T
     return tuple(map(tuple, uvz[:, :2] / uvz[:, 2:] - 0.5))
+
+
+def foreground(rgb):
+    return (rgb.max(axis=2) > 45) & (np.ptp(rgb.astype(np.int16), axis=2) > 20)
+
+
+def erode_one_pixel(mask):
+    padded = np.pad(mask, 1, constant_values=False)
+    h, w = mask.shape
+    return np.logical_and.reduce([padded[y:y + h, x:x + w]
+                                  for y in range(3) for x in range(3)])
+
+
+def nonflat_render_metrics(backend, observation):
+    """Independent projected triangle union plus ray depths on interior samples."""
+    positions = backend.get_positions()
+    calibration = observation.calibration
+    inverse_pose = np.linalg.inv(np.asarray(calibration["camera_to_world"]))
+    camera = np.c_[positions, np.ones(len(positions))] @ inverse_pose.T
+    assert np.all(camera[:, 2] > 0)
+    uvz = camera[:, :3] @ np.asarray(calibration["intrinsics"]).T
+    width, height = calibration["image_size"]
+    assert width == height
+    projected = np.c_[uvz[:, :2] / uvz[:, 2:] - width / 2, np.zeros(len(positions))]
+    # Cell centres are exactly u+.5,v+.5; this oracle uses PHYSICS triangles,
+    # not the Genesis visual mesh, rendered depth, or RGB segmentation.
+    oracle = CoverageGrid(width, 1).mask(projected, backend.faces)
+    predicted = foreground(observation.rgb)
+    interior_prediction = erode_one_pixel(predicted)
+    interior_oracle = erode_one_pixel(oracle)
+    precision = float(np.mean(oracle[interior_prediction]))
+    recall = float(np.mean(predicted[interior_oracle]))
+    raw_iou = float(np.sum(predicted & oracle) / np.sum(predicted | oracle))
+    assert precision > .995 and recall > .995
+    assert raw_iou > .94
+    candidates = np.argwhere(interior_prediction & interior_oracle)
+    errors = []
+    for v, u in candidates[np.linspace(0, len(candidates) - 1, 128, dtype=int)]:
+        origin, direction = pixel_ray((u, v), calibration)
+        hit, _ = ray_surface_hit(origin, direction, positions, backend.faces)
+        expected_depth = (inverse_pose @ [*hit, 1])[2]
+        errors.append(abs(float(observation.depth[v, u]) - expected_depth))
+    quantiles = np.percentile(errors, [50, 95, 100])
+    # Genesis skins the 1 cm visual mesh from neighboring remeshed particles;
+    # allow half a mesh spacing, not centimetres of stale planar depth.
+    assert quantiles[-1] < backend.config.mesh_spacing_m / 2
+    return {"eroded_precision": precision, "eroded_recall": recall, "raw_iou": raw_iou,
+            "predicted_pixels": int(predicted.sum()), "oracle_pixels": int(oracle.sum()),
+            "depth_error_m_median_p95_max": quantiles.tolist()}
+
+
+def test_nonflat_first_frame_and_immediate_restore(tmp_path):
+    """Fold must be the FIRST rendered state, to catch unallocated GL buffers."""
+    report = {}
+    stamp = time.monotonic()
+    with GenesisBackend(SceneConfig()) as backend:
+        original_render = backend.camera.render
+        render_calls = []
+
+        def immutable_render(**options):
+            state = backend.snapshot()
+            step = backend.scene._t
+            result = original_render(**options)
+            assert backend.scene._t == step
+            assert backend.snapshot()["state_hash"] == state["state_hash"]
+            render_calls.append(options)
+            return result
+
+        backend.camera.render = immutable_render
+        folded = backend.reset(11, kind="fold")
+        fold_state = backend.snapshot()
+        assert len(render_calls) == 2  # Warm buffers, then upload actual folded vertices.
+        report["fold_first_frame"] = nonflat_render_metrics(backend, folded)
+        # Direct observation/restore cannot hide a refresh behind physics steps.
+        step = backend.scene._t
+        original_step = backend.scene.step
+
+        def forbidden_step(*args, **kwargs):
+            pytest.fail("observation/restore must not advance physics")
+
+        backend.scene.step = forbidden_step
+        # A shifted, raised NONPLANAR fixture at the same step exercises explicit
+        # setters through restore, with substantial silhouette and depth changes.
+        shifted = {key: value.copy() if isinstance(value, np.ndarray) else value
+                   for key, value in fold_state.items()}
+        shifted["positions"] += np.array([-.12, -.08, .12], dtype=np.float32)
+        shifted["state_hash"] = _state_hash(shifted)
+        raised = backend.restore(shifted)
+        report["same_step_raised_restore"] = nonflat_render_metrics(backend, raised)
+        assert backend.scene._t == step
+        assert backend.snapshot()["state_hash"] == shifted["state_hash"]
+        assert np.mean(foreground(raised.rgb) != foreground(folded.rgb)) > .02
+        restored = backend.restore(fold_state)
+        np.testing.assert_array_equal(restored.rgb, folded.rgb)
+        np.testing.assert_array_equal(restored.depth, folded.depth)
+        assert restored.observation_id == folded.observation_id
+        assert backend.snapshot()["state_hash"] == fold_state["state_hash"]
+        assert backend.scene._t == step
+        backend.scene.step = original_step
+        flat = backend.reset(7, kind="flat")
+        assert np.mean(foreground(flat.rgb) != foreground(folded.rgb)) > .05
+        # Restore folded state after a flat render, at an unchanged scene step.
+        backend.scene.step = forbidden_step
+        step = backend.scene._t
+        from_flat = backend.restore(fold_state)
+        report["fold_restore_after_flat"] = nonflat_render_metrics(backend, from_flat)
+        assert backend.scene._t == step
+        assert backend.snapshot()["state_hash"] == fold_state["state_hash"]
+        np.testing.assert_array_equal(from_flat.rgb, folded.rgb)
+        np.testing.assert_array_equal(from_flat.depth, folded.depth)
+        assert from_flat.observation_id == folded.observation_id
+        assert backend.attached_ids == () and backend._free().all()
+        np.savez_compressed(tmp_path / "nonflat-render-evidence.npz", rgb=folded.rgb,
+                            depth=folded.depth, **fold_state)
+        report["wall_seconds"] = time.monotonic() - stamp
+        print("STAGE0_NONFLAT_RENDER_REPORT=" + json.dumps(report, sort_keys=True))
 
 
 def test_host_pipeline(tmp_path):
