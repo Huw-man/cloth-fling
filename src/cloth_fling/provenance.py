@@ -16,8 +16,19 @@ def package_versions() -> dict[str, str | None]:
     """Distribution identity only; never imports the packages being inspected."""
     packages = {}
     for name in (
-        "cloth-fling", "genesis-world", "quadrants", "torch", "trimesh", "numpy",
-        "pyarrow", "pillow", "pydantic", "gs-madrona", "av", "imageio", "imageio-ffmpeg",
+        "cloth-fling",
+        "genesis-world",
+        "quadrants",
+        "torch",
+        "trimesh",
+        "numpy",
+        "pyarrow",
+        "pillow",
+        "pydantic",
+        "gs-madrona",
+        "av",
+        "imageio",
+        "imageio-ffmpeg",
     ):
         try:
             packages[name] = importlib.metadata.version(name)
@@ -114,11 +125,16 @@ def config_provenance(env, *, appearance=None, primitive_config=None, reset_sour
             {
                 key: reset_source.get(key)
                 for key in (
-                    "schema_version", "engine", "engine_version", "runtime_identity_json",
-                    "config_json", "config_hash",
+                    "schema_version",
+                    "engine",
+                    "engine_version",
+                    "runtime_identity_json",
+                    "config_json",
+                    "config_hash",
                 )
             }
-            if reset_source is not None else None
+            if reset_source is not None
+            else None
         ),
         "physics_config": physics,
         "physics_config_sha256": config_hash(physics),
