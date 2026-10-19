@@ -33,7 +33,7 @@ Exact signatures:
 
 - `select_action(observation: Observation, config: SceneConfig | SelectionConfig, *, policy: str = 'uniform_valid', primitive: str = 'laydown', rng: numpy.random.Generator | None = None) -> GraspAction`
 - `feasible_candidates(observation: Observation, config: SceneConfig | SelectionConfig, *, primitive: str = 'laydown', max_pairs: int = 256) -> list[GraspAction]`
-- `execute_action(env: ClothBackend, action: GraspAction, config: PrimitiveConfig | None = None) -> ActionOutcome`
+- `execute_action(env: ClothBackend, action: GraspAction, config: PrimitiveConfig | None = None, *, trace_callback=None) -> ActionOutcome`
 - `run_diagnostic(env: ClothBackend, *, seed: int = 0, output_dir=None, primitive_config: PrimitiveConfig | None = None, action: GraspAction | None = None) -> dict`
 
 `execute_action` never resets/restores. Valid actions can follow one another on the
@@ -44,6 +44,22 @@ read afterward. Backend step duration must match `env.config.sim_dt`.
 No command writes particle positions, velocities, damping or material parameters.
 The backend must resolve each visible pixel to its surface and preserve velocity
 when releasing. Distinct returned particle IDs and the attachment lifecycle are checked.
+
+An optional `trace_callback(env, trace)` receives each captured trace after its
+numeric measurements, including forced phase-boundary and clearance-failure
+samples. The default is `None`. A recorder can use the hook for native debug
+views without rendering imports in primitives or a change to learned RGB input.
+The callback must not step or mutate physics. Ordinary callback errors return an
+invalid outcome with `trace_callback_failed_<type>: <message>` and release cleanup;
+external `TimeoutError` propagates after cleanup. Callback wall time counts toward
+the existing action deadline. The callback observes captured traces, while safety
+checks continue on every physics step even between captures.
+After unprojecting and validating the selected RGB pixels, a forced `selected`
+trace is captured before `attach`. It exposes `selected_grasp_positions_m` with
+empty attachment IDs and no measured/commanded grasps. The initial `before` trace
+has `selected_grasp_positions_m=null`; the original before-observation remains
+untouched. Later traces retain the selected surface points and separately report
+the actual measured attached vertices. This extra trace does not add a motion phase.
 
 ## Selection and calibration agreement
 
@@ -109,9 +125,9 @@ The returned geometry baseline policy label is
 ## Motion and bounds
 
 The controlled baseline phases are:
-`attach -> lift -> tauten -> diagonal_laydown -> drag -> release -> settle`.
+`attach -> lift -> tauten -> clearance -> diagonal_laydown -> drag -> release -> settle`.
 The candidate phases are:
-`attach -> lift -> tauten -> swing -> pullback -> lower -> place -> release -> settle`.
+`attach -> lift -> tauten -> clearance -> swing -> pullback -> lower -> place -> release -> settle`.
 
 Lift is one continuous trajectory. Tautening reads the measured grasp geometry
 and shortest-rest-path sag every step. It uses a smooth span-rate envelope, gated
@@ -139,8 +155,8 @@ Tautening proactively brakes when any edge's current or projected strain reaches
 measured relative velocity along the edge divided by rest length, over a horizon
 of current span stopping time plus two simulation ticks. It never averages away
 an isolated high-strain edge. The stop latches: expansion rate decelerates within
-the configured acceleration bound to zero, then transitions to laydown/swing
-without a long airborne hold. A discrete stopping-distance bound also brakes before
+the configured acceleration bound to zero, then transitions to the whole-cloth
+clearance gate. A discrete stopping-distance bound also brakes before
 the material target. No cloth velocity or damping is modified. Predictions are
 proxies and cannot guarantee future strain under cloth inertia or solver error;
 a hard-ceiling violation still invalidates the action. `diagnostics['tauten']`
@@ -148,13 +164,47 @@ records initial/target/final spans, the cap, soft limit, stop reason, and any br
 trigger's measured/predicted strain, span rate, simulation time and horizon.
 Missing rest metadata disables this strain predictor and retains the labeled fallback.
 
+The initial lift remains 0.30 m by default, followed by the same strain-limited
+tautening. Clearance then checks **all cloth particle surfaces**, using
+`min(z - particle_radius - table_height_m)`. Radius is
+`env.particle_diameter / 2`, falling back to `env.config.mesh_spacing_m / 2` when
+the backend has no diameter metadata; invalid diameter metadata fails explicitly.
+Raised grasp points alone cannot satisfy this gate. If any surface remains below
+0.020 m clearance, both attachment targets rise together in a smooth 0.05 m
+increment, shortened at the height cap. Each increment reuses the trajectory's
+speed/acceleration bounds and the per-step strain/workspace/deadline guards.
+The increment duration starts at `lift_seconds * increment / lift_height_m` and
+is lengthened by the existing analytic kinematic bounds. No free particle receives
+a motion command. Increment endpoints intentionally stop for measurement.
+
+Before either placement primitive, the whole surface must stay at least 0.020 m
+above the table for 0.1 continuous simulated seconds. Clear time during an increment
+counts; the gate is evaluated after completing that increment and its endpoint
+deceleration. Any insufficient-clearance tick resets the hold. While clear but
+short of the hold, the attachments stay fixed and physics continues. Failure at
+the 0.75 m grasp-height cap returns `lift_max_height`; continued fluctuation is
+still bounded by the action deadlines. Height is measured above the configured
+table, and enabled execution rejects attachment commands above the configured cap.
+Strain and deadline failures retain `cloth_strain_limit`, `simulated_deadline` or
+`wall_deadline`. All ordinary failures release and capture the current terminal
+observation; no reset is introduced.
+
+After clearance passes, fling checks the same whole-surface threshold on **every
+physics step through swing and pullback**, regardless of trace cadence. A single
+insufficient-clearance tick returns `premature_table_contact`, captures that failing
+tick, and runs the existing release cleanup. This is a conservative geometric
+guard, not evidence of native contact. Intentional descent may cross the threshold
+once the `lower` phase starts. Laydown begins intentional descent immediately after
+the gate. `clearance_enabled=False` retains the legacy phase order for measured
+comparisons and is recorded in config/evidence; it makes no clearance guarantee.
+
 Laydown moves diagonally down/forward and continues into a short near-table drag.
 The fling candidate retains attachment throughout one continuous swing, pullback,
 lowering and placement trajectory. Release checks actual grasp z <= table+0.02 m.
 Both use C2 piecewise quintic Bezier interpolation with shared tangents through
 internal waypoints. Derivative control hulls analytically bound speed/acceleration;
 time is lengthened as needed. Dense physics samples introduce no stops. The entire
-lift, tauten and final trajectory have intended stopping boundaries; swing/pullback/
+lift, tauten, clearance increments and final trajectory have intended stopping boundaries; swing/pullback/
 lower/place and laydown/drag internal boundaries pass through without stopping.
 Actual command finite differences are checked too. Workspace violations fail
 explicitly; trajectories are never silently clipped into a different motion.
@@ -163,7 +213,7 @@ PrimitiveConfig defaults (SI):
 
 | Field(s) | Default |
 | --- | --- |
-| `table_height_m`, `lift_height_m`, `release_height_m` | 0, 0.30, 0.008 |
+| `table_height_m`, `lift_height_m`, `release_height_m` | 0, 0.30, 0.020 |
 | `lift_seconds`, `tauten_seconds` | 1.8, 2.0 |
 | `laydown_seconds`, `drag_seconds`, `fling_segment_seconds` | 2.0, 0.8, 0.45 |
 | `laydown_distance_m`, `drag_distance_m` | 0.12, 0.06 |
@@ -174,6 +224,15 @@ PrimitiveConfig defaults (SI):
 | `settle_rms_m_s`, `settle_hold_seconds`, `settle_timeout_seconds` | 0.01, 0.5, 10.0 |
 | `max_simulated_seconds`, `max_wall_seconds` | 30.0, 120.0 |
 | `trace_interval_seconds` | 0.05 |
+| `clearance_enabled` | true |
+| `clearance_increment_m`, `clearance_max_height_m` | 0.05, 0.75 |
+| `clearance_m`, `clearance_hold_seconds` | 0.020, 0.1 |
+
+Clearance fields are runtime configurable. Increments may be reduced, height caps
+may be lowered (not below the enabled initial lift), and clearance/hold thresholds
+may be increased. Validation preserves increment <=0.05 m, height <=0.75 m,
+clearance >=0.020 m and hold >=0.1 s. Use the explicit disabled mode for legacy
+comparisons instead of weakening an enabled clearance guard.
 
 Settling requires `sqrt(mean(sum(v_xyz**2))) < 0.01 m/s` continuously for 0.5 seconds;
 any threshold crossing restarts the quiet window. It is capped at 10 seconds.
@@ -217,6 +276,21 @@ proximity. Phase boundaries force additional samples. Grasp positions continue
 being measured after release. Terminal state arrays are recorded separately.
 Full coverage is measured at trace cadence and action endpoints; finite state,
 edge strain, speed, attachment state and deadlines are checked every physics step.
+Each trace also records `min_surface_clearance_m` and
+`near_table_surface_fraction_proxy` (fraction with surface <=table+0.01 m), retaining
+the historical centre-based `table_proximity_fraction_proxy` separately.
+`diagnostics['clearance']` records:
+
+- `enabled`, radius, required clearance/hold, and `gate_passed` (`null` in legacy mode).
+- `measured_min_clearance_m`: minimum across acquisition and protected swing/pullback
+  ticks, including early acquisition ticks while cloth may still be on the table.
+- `hold_seconds` and `hold_min_clearance_m`: final continuous clear window at the gate;
+  `protected_min_clearance_m`: minimum during guarded swing/pullback.
+- `achieved_height_m`: highest measured minimum grasp height above table during
+  acquisition; `latest_min_clearance_m` and `near_table_fraction`: latest sampled
+  surface geometry, which can include intentional placement and settling.
+- `failure_reason`: final invalid-outcome reason when enabled, or `null` on success.
+
 Diagnostics record command speed/acceleration maxima, release velocity delta,
 release coverage, post-release recoil, peak sampled settle-coverage recoil,
 settling and metadata availability. `rest_flat_chord_m` and
