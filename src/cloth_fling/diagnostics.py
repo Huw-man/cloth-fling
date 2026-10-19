@@ -1,0 +1,234 @@
+"""Two-action restored-fixture comparison, never an automatic quality qualification."""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import math
+import time
+from dataclasses import asdict, replace
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from cloth_fling.contracts import ClothBackend, GraspAction
+from cloth_fling.selection import select_action
+from cloth_fling.sim.primitives import PrimitiveConfig, execute_action
+
+
+def _fingerprint(env):
+    arrays = [env.get_positions(), env.get_velocities()]
+    digest = hashlib.sha256()
+    for value in arrays:
+        array = np.ascontiguousarray(value)
+        if not np.isfinite(array).all():
+            raise ValueError("nonfinite_fixture_state")
+        digest.update(str((array.shape, str(array.dtype))).encode())
+        digest.update(array.tobytes())
+    digest.update(
+        repr(
+            (float(env.simulated_time), tuple(env.attached_ids), tuple(env.coverage()))
+        ).encode()
+    )
+    return digest.hexdigest()
+
+
+def _json_safe(value: Any):
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return _json_safe(value.tolist())
+    if isinstance(value, (float, np.floating)):
+        return float(value) if math.isfinite(value) else None
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    return value
+
+
+def _save_fixture(directory, fixture):
+    arrays = {}
+
+    def split(value):
+        if isinstance(value, np.ndarray):
+            if value.dtype.hasobject:
+                raise ValueError("fixture object arrays are not safe state artifacts")
+            key = f"array_{len(arrays)}"
+            arrays[key] = value
+            return {"npz_key": key}
+        if isinstance(value, dict):
+            return {str(k): split(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [split(v) for v in value]
+        return _json_safe(value)
+
+    metadata = split(fixture)
+    np.savez_compressed(directory / "fixture.npz", **arrays)
+    (directory / "fixture.json").write_text(
+        json.dumps(metadata, indent=2, allow_nan=False) + "\n"
+    )
+    return {"metadata": "fixture.json", "arrays": "fixture.npz"}
+
+
+def _save_observations(directory, primitive, outcome):
+    from PIL import Image
+
+    references = {}
+    depths = {}
+    cameras = {}
+    for name, obs in (("before", outcome.before), ("after", outcome.after)):
+        filename = f"{primitive}_{name}.png"
+        rgb = np.asarray(obs.rgb)
+        if np.issubdtype(rgb.dtype, np.floating) and rgb.max(initial=0) <= 1:
+            rgb = rgb * 255
+        Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8)).save(
+            directory / filename
+        )
+        references[f"{name}_rgb"] = filename
+        if obs.depth is not None:
+            depths[name] = obs.depth
+        cameras[name] = _json_safe(obs.calibration)
+    depth_file, camera_file = f"{primitive}_depth.npz", f"{primitive}_camera.json"
+    np.savez_compressed(directory / depth_file, **depths)
+    (directory / camera_file).write_text(
+        json.dumps(cameras, indent=2, allow_nan=False) + "\n"
+    )
+    references.update(depth=depth_file, calibration=camera_file)
+    return references
+
+
+def run_diagnostic(
+    env: ClothBackend,
+    *,
+    seed: int = 0,
+    output_dir=None,
+    primitive_config: PrimitiveConfig | None = None,
+    action: GraspAction | None = None,
+) -> dict[str, Any]:
+    """Compare one laydown and one fling from the *current* saved fixture.
+
+    No reset or broad campaign. Select once before any motion. Restore and verify positions,
+    velocities, attachments, clock and coverage exactly before each action and on exit.
+    A restoration mismatch stops comparison and is explicitly invalid, never a new fixture.
+    """
+    started = time.monotonic()
+    c = primitive_config or PrimitiveConfig()
+    directory = Path(output_dir) if output_dir is not None else None
+    report: dict[str, Any] = {
+        "schema": "cloth_fling.diagnostic.v1",
+        "seed": seed,
+        "config": asdict(c),
+        "runs": [],
+        "errors": [],
+        "execution_valid": False,
+        "restore_checks": [],
+        "final_restore_valid": False,
+        "restore_validation_fields": [
+            "positions",
+            "velocities",
+            "attachments",
+            "simulated_time",
+            "coverage",
+        ],
+        "pair_selection": "geometry_guided_privileged_depth; RGB boundary candidates",
+        "comparison": "one laydown baseline / one retained-grasp fling candidate",
+        "quality_qualified": False,
+        "behavior_passed": None,
+        "evidence_scope": "backend execution diagnostic; no GPU or behavior qualification implied",
+        "campaign_deferred": "600-run campaign, training, held-out policy comparisons",
+    }
+    fixture = None
+    fingerprint = None
+    try:
+        if tuple(env.attached_ids):
+            raise ValueError("diagnostic_requires_unattached_fixture")
+        fixture = copy.deepcopy(env.snapshot())
+        fingerprint = _fingerprint(env)
+        if action is None:
+            action = select_action(
+                env.observe(),
+                env.config,
+                policy="geometry_guided",
+                primitive="laydown",
+                rng=np.random.default_rng(seed),
+            )
+        else:
+            report["pair_selection"] = (
+                "manual_fixed_pair; privileged depth execution feasibility"
+            )
+        if directory is not None:
+            directory.mkdir(parents=True, exist_ok=True)
+            report["fixture_artifacts"] = _save_fixture(directory, fixture)
+        report["fixed_pixels"] = action.pixels
+        report["fixture_sha256"] = fingerprint
+        for primitive in ("laydown", "fling"):
+            if time.monotonic() - started >= 2 * c.max_wall_seconds:
+                raise TimeoutError("diagnostic_wall_deadline")
+            env.restore(copy.deepcopy(fixture))
+            matched = _fingerprint(env) == fingerprint
+            report["restore_checks"].append({"before": primitive, "valid": matched})
+            if not matched:
+                raise ValueError(f"fixture_restore_mismatch_before_{primitive}")
+            outcome = execute_action(env, replace(action, primitive=primitive), c)
+            artifacts = (
+                _save_observations(directory, primitive, outcome)
+                if directory is not None
+                else {}
+            )
+            report["runs"].append(
+                {
+                    "artifacts": artifacts,
+                    "primitive": primitive,
+                    "pixels": outcome.action.pixels,
+                    "execution_valid": outcome.execution_valid,
+                    "reason": outcome.reason,
+                    "coverage_before": outcome.coverage_before,
+                    "coverage_after": outcome.coverage_after,
+                    "coverage_gain": outcome.coverage_after - outcome.coverage_before,
+                    "area_before_m2": outcome.area_before_m2,
+                    "area_after_m2": outcome.area_after_m2,
+                    "simulated_seconds": outcome.simulated_seconds,
+                    "wall_seconds": outcome.wall_seconds,
+                    "diagnostics": outcome.diagnostics,
+                    "evidence": outcome.evidence,
+                }
+            )
+        report["execution_valid"] = all(r["execution_valid"] for r in report["runs"])
+        if report["execution_valid"]:
+            baseline, candidate = report["runs"]
+            report["candidate_minus_baseline_final_coverage"] = (
+                candidate["coverage_after"] - baseline["coverage_after"]
+            )
+    except Exception as exc:
+        report["errors"].append({"type": type(exc).__name__, "message": str(exc)})
+        report["execution_valid"] = False
+    finally:
+        if fixture is not None:
+            try:
+                env.restore(copy.deepcopy(fixture))
+                report["final_restore_valid"] = _fingerprint(env) == fingerprint
+                if not report["final_restore_valid"]:
+                    raise ValueError("final_fixture_restore_mismatch")
+            except Exception as exc:
+                report["errors"].append(
+                    {
+                        "type": type(exc).__name__,
+                        "message": str(exc),
+                        "stage": "final_restore",
+                    }
+                )
+                report["execution_valid"] = False
+                report["final_restore_valid"] = False
+    report["wall_seconds"] = time.monotonic() - started
+    report = _json_safe(report)
+    if directory is not None:
+        directory.mkdir(parents=True, exist_ok=True)
+        temporary = directory / "diagnostic.json.tmp"
+        temporary.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+        temporary.replace(directory / "diagnostic.json")
+    return report
