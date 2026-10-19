@@ -14,8 +14,10 @@ def test_offline_import_and_doctor_do_not_import_simulator():
 import json, sys
 from cloth_fling.cli import doctor_report, load_config
 from cloth_fling.contracts import SceneConfig
+from cloth_fling.provenance import runtime_provenance
 assert load_config(None) == SceneConfig()
 report = doctor_report()
+assert runtime_provenance()['torch_cuda_version'] is None
 assert not report['simulation_probed']
 assert not any(k == 'genesis' or k.startswith('genesis.') for k in sys.modules)
 assert 'torch' not in sys.modules

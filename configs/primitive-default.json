@@ -1,0 +1,14 @@
+{
+  "lift_height_m": 0.30,
+  "release_height_m": 0.008,
+  "lift_seconds": 1.8,
+  "tauten_seconds": 2.0,
+  "laydown_seconds": 2.0,
+  "drag_seconds": 0.8,
+  "fling_segment_seconds": 0.45,
+  "max_speed_m_s": 1.4,
+  "max_acceleration_m_s2": 5.0,
+  "settle_timeout_seconds": 10.0,
+  "max_simulated_seconds": 30.0,
+  "max_wall_seconds": 120.0
+}

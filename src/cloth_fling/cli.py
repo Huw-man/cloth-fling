@@ -96,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose = sub.add_parser("diagnose", help="Compare primitives on one restored fixture")
     diagnose.add_argument("--output", type=Path, required=True)
     diagnose.add_argument("--seed", type=int, default=0)
+    diagnose.add_argument("--primitive-config", help="Separate motion/settling JSON overrides")
     diagnose.add_argument("--reset-kind", choices=("flat", "drop", "fold"), default="fold")
     diagnose.add_argument("--reset-dir", type=Path, help="Compare from a saved fixture")
     diagnose.add_argument(
@@ -112,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--max-actions", type=int, default=3)
     collect.add_argument("--max-wall-seconds", type=float, default=600)
     collect.add_argument("--seed", type=int, default=0)
+    collect.add_argument("--primitive-config", help="Separate motion/settling JSON overrides")
     collect.add_argument(
         "--reset-dir", type=Path, help="Restore a saved reset at episode boundaries"
     )
@@ -164,6 +166,13 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("episodes must be positive and max-actions must be in [1, 10]")
             if not 0 < args.max_wall_seconds <= 86400:
                 raise ValueError("max-wall-seconds must be in (0, 86400]")
+        primitive_config = None
+        if args.command in ("collect", "diagnose") and args.primitive_config:
+            from cloth_fling.sim.primitives import PrimitiveConfig
+
+            primitive_config = PrimitiveConfig(
+                **json.loads(Path(args.primitive_config).read_text())
+            )
         env = _backend(args)
         try:
             if args.command == "collect":
@@ -180,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
                     max_wall_seconds=args.max_wall_seconds,
                     reset_state=load_reset(args.reset_dir) if args.reset_dir else None,
                     reset_kind=args.reset_kind,
+                    primitive_config=primitive_config,
                 )
             elif args.command == "diagnose":
                 from cloth_fling.contracts import GraspAction
@@ -193,7 +203,13 @@ def main(argv: list[str] | None = None) -> int:
                 if args.grasp_pixels:
                     u0, v0, u1, v1 = args.grasp_pixels
                     action = GraspAction(((u0, v0), (u1, v1)), policy="manual_favorable")
-                report = run_diagnostic(env, seed=args.seed, output_dir=args.output, action=action)
+                report = run_diagnostic(
+                    env,
+                    seed=args.seed,
+                    output_dir=args.output,
+                    action=action,
+                    primitive_config=primitive_config,
+                )
             else:
                 import numpy as np
                 from PIL import Image

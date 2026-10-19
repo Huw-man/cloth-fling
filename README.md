@@ -60,6 +60,9 @@ is unqualified. Those failures are recorded, with no fallback to a different res
 The controlled baseline is lift, tauten, diagonal laydown, drag, then release.
 The fling candidate retains both grasps through swing, lowering and placement;
 it releases near the table. Both remain configurable independently of selection.
+Use `--primitive-config configs/primitive-default.json` on `collect` or `diagnose`
+to override motion/settling values separately from the scene configuration. The
+executed complete primitive configuration is retained in supporting evidence.
 
 Within each episode the collector releases, settles, observes, and chooses again
 on the evolved cloth. It resets at episode boundaries or after a recorded invalid
