@@ -1,16 +1,26 @@
 # Native table contact, milestone 2
 
-`native_coulomb_v1` is a provisional simulation contact profile for one fixed,
+`native_coulomb_v2` is a provisional simulation contact profile for one fixed,
 horizontal Box table and one robotless PBD cloth. It is an engineering adaptation
-of Genesis 0.4.3, not a measured terry-towel/desk material calibration. Attachment
+of Genesis 1.4.4, not a measured terry-towel/desk material calibration. Attachment
 remains explicit particle assistance, never a physical pinch-grasp claim.
+
+## Migration status
+
+CPU compatibility tests cover the 1.4.4 source guards, archived-profile rejection,
+schema-2 exact restore, cross-engine rejection, render-only latching, attachment
+momentum and offline import isolation. **Genesis 1.4.4 GPU contact and rendering
+qualification are pending.** The 0.4.3 results below remain historical evidence
+and confer no pass status on v2. Bounded 1.4.4 probes require the coordinator's
+exclusive GPU lease and the shared upgraded environment; never use the old venv.
+Full backend probes also require the separate rendering port.
 
 ## Contact law and isolation
 
 `sim/native_contact.py` installs a new `LegacyCoupler` subclass instance on this
 scene's simulator **before build**. It calls the unchanged upstream normal
 function, then changes only tangential velocity. Installed Genesis files and
-classes are untouched. The version must be exactly 0.4.3. AST SHA-256 guards pin
+classes are untouched. The version must be exactly 1.4.4. AST SHA-256 guards pin
 both the normal function and its calling kernel; changed executable source fails
 clearly. Whitespace and comments may differ. Other Genesis versions require a
 new review and profile qualification, not a bypass of the guard.
@@ -47,26 +57,51 @@ adds no normal damping to conceal it.
 
 | Configuration | Static table mu | Kinetic table mu | Status |
 | --- | ---: | ---: | --- |
-| `configs/contact-native-v1.json` | .40 | .30 | provisional engineering prior |
-| `configs/contact-low-v1.json` | .25 | .20 | sensitivity prior |
-| `configs/contact-high-v1.json` | .60 | .45 | sensitivity prior |
+| `configs/contact-native-v2.json` | .40 | .30 | unqualified v2 engineering prior |
+| `configs/contact-low-v2.json` | .25 | .20 | unqualified v2 sensitivity prior |
+| `configs/contact-high-v2.json` | .60 | .45 | unqualified v2 sensitivity prior |
 
-Use `SceneConfig(contact_profile="native_coulomb_v1", table_static_friction=.4,
+Use `SceneConfig(contact_profile="native_coulomb_v2", table_static_friction=.4,
 table_kinetic_friction=.3)`. Omitted native table coefficients resolve to .40/.30.
 `static_friction` and `kinetic_friction` still configure Genesis cloth/self-contact;
 these remain .15/.15 by default. They are distinct from the new table fields.
 `table_friction=False` sets native table friction to zero while preserving normal
 contact. The profile still identifies the native path.
 
-Historical `SceneConfig` defaults remain `legacy_mg_v1`. That path uses the old
-poststep, narrow support-window `mg` adapter. Its default JSON serialization is
-unchanged, so old configuration hashes/snapshots remain usable. Explicit new table
-coefficients are also available to the legacy adapter. Native scenes skip the
-legacy adapter entirely; both cannot apply. New profiles or coefficients change
-physics identity and therefore snapshot hashes; restoring across physics profiles
-is intentionally rejected. Reset construction and primitive trajectories are
-unchanged. Appearance hooks only affect the table renderer and are excluded from
-physics config and snapshot identity.
+`SceneConfig` keeps `legacy_mg_v1` as its omitted-profile archive decoder so old
+JSON hashes and offline dataset tools remain readable. Both `legacy_mg_v1` and
+`native_coulomb_v1` are rejected by the 1.4.4 backend before initialization. New
+simulation callers must select v2 explicitly. The v1 config files are unchanged.
+The legacy poststep helper remains available for offline reference tests; new
+scenes never execute it. Table appearance remains excluded from physics identity.
+
+Physical snapshots now use **schema 2**, with `engine="genesis"`,
+`engine_version="1.4.4"`, `substeps=4`, and canonical `runtime_identity_json`, in
+addition to configuration, topology, positions, velocity, attachment flags and
+content hash. `restore` rejects schema-1 physical state explicitly, even when the
+rest mesh happens to match. Engine/runtime identity, configuration, calibration,
+mesh and content checks all precede device setters. No archive metadata editing
+or reset conversion makes an old physical state compatible.
+
+The rendering port may call `backend.restore_recorded_geometry(state)` for schema
+1 or 2 archives **only if faces, edges, rest positions and mesh hash match
+exactly**. This hook verifies the recorded content hash, writes recorded positions
+without stepping, and permanently latches that instance into render-only mode.
+It zeros velocities rather than claiming to restore dynamics. `step`, `reset`,
+`attach`, physical `restore`, and physical `snapshot` then fail. The hook returns an
+observation; `recorded_geometry_identity` records source state/schema/engine and
+render engine separately. Different triangulations or particle orders are
+unsupported, with no interpolation or hidden stepping. Construct a fresh backend
+for physics. `runtime_identity` and `capabilities` provide JSON-safe metadata for
+CLI/provenance; neither property asserts qualification.
+
+The 1.4.4 PBD public entity setters/getters, `fix_particles(...,
+zero_velocity=False)` and `release_particle` retain their roles. The cloth loader
+still remeshes to PBD `particle_size`; `Cloth.rho` still denotes kg/m² and mass is
+surface area times rho. The scene explicitly selects `LegacyCouplerOptions` and
+uses public `RigidOptions(use_gjk_collision=True)`. No material, mass, reset or
+primitive values were retuned: dt remains .002, four substeps, 64 stretch sweeps.
+The solver-state `get_state` readback still supplies native free flags.
 
 ## Diagnostic API and evidence
 
@@ -75,7 +110,7 @@ from cloth_fling.contracts import SceneConfig
 from cloth_fling.contact_diagnostics import run_contact_diagnostic
 
 report = run_contact_diagnostic(
-    SceneConfig(contact_profile="native_coulomb_v1"),
+    SceneConfig(contact_profile="native_coulomb_v2"),
     output_dir="runs/contact-example", backend="gpu",
     duration_s=.6, include_half_dt=True,
 )
@@ -85,7 +120,7 @@ The config may also be a `SceneConfig` dictionary. The standalone module command
 
 ```bash
 PYTHONPATH=src python -m cloth_fling.contact_diagnostics \
-  --config configs/contact-native-v1.json --output-dir runs/contact-example
+  --config configs/contact-native-v2.json --output-dir runs/contact-example
 ```
 
 The coordinator can connect this API to the main CLI; CONTACT does not edit it.
@@ -190,11 +225,19 @@ passed gate qualifies these bounded simulator fixtures only.
 - [Physics-Based Simulation: Collision Constraints](https://phys-sim-book.github.io/position-based-simulations/other-common-constraints/pbd_collisions_constraints.html)
   describes static and kinetic tangential correction bounds. It supports the
   contact-law design, not values for a particular towel and desk.
-- The installed Genesis 0.4.3 `engine/couplers/legacy_coupler.py` normal function
-  explicitly omits friction. Its executable source is pinned by the hashes in
-  `native_contact.py`; current online [Genesis PBD cloth documentation](https://genesis-world.readthedocs.io/en/v1.4.0/api_reference/engine/material/pbd/cloth.html)
-  describes material fields but is a different version and does not establish
-  0.4.3 rigid-table friction behavior.
+- Genesis 1.4.4, upstream `a649105`,
+  [`engine/couplers/legacy_coupler.py`](https://github.com/Genesis-Embodied-AI/Genesis/blob/a649105/genesis/engine/couplers/legacy_coupler.py):
+  `_func_pbd_collide_with_rigid_geom` explicitly omits friction. New executable
+  AST hashes pin that normal function and `kernel_pbd_rigid_collide`. The v2 port
+  uses `array_class.RigidInfo` and the new coupling-force argument order
+  `(link_idx, batch_idx, pos, force, links_state)`.
+- The same wheel's `sap_coupler.py` builds rigid/FEM contact handlers; its
+  `ipc_coupler/coupler.py` imports rigid/FEM entities and routes cloth through the
+  FEM path. Neither implements the PBD cloth-table friction required here.
+  Switching to FEM/IPC would change the physical model and is outside this port.
+- `engine/entities/pbd_entity.py` (`PBD2DEntity.sample`) and
+  `engine/materials/PBD/cloth.py` establish remeshing and areal-density semantics.
+  Review used the verified 1.4.4 wheel source; no installed files were changed.
 
 No directly applicable published coefficient for the actual terry towel, desk
 finish, moisture, pressure and pull conditions has been established here. The
@@ -202,7 +245,7 @@ three coefficient pairs are engineering priors, never literature measurements or
 simulated calibration promoted to a real material match. This work qualifies no
 learned model, general reset distribution, physical grasp, or deployment.
 
-## Bounded host evidence, 2026-10-19
+## Historical Genesis 0.4.3 evidence, 2026-10-19
 
 The RTX 5080 run used Genesis 0.4.3, .5 m cloth, 1 cm particle diameter,
 `sim_dt=.002`, four substeps and the half-dt comparison. All three profiles passed

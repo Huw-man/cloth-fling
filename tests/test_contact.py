@@ -69,7 +69,7 @@ def test_native_profile_cannot_apply_legacy_poststep_adapter():
 
     # No cloth/scene exists: touching a setter/readback would fail this check.
     backend = GenesisBackend.__new__(GenesisBackend)
-    backend.config = SceneConfig(contact_profile="native_coulomb_v1")
+    backend.config = SceneConfig(contact_profile="native_coulomb_v2")
     backend._apply_table_friction()
 
 

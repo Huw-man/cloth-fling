@@ -1,12 +1,15 @@
 """Opt-in bounded tests of the actual native Quadrants contact function."""
 
 import os
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from cloth_fling.contracts import SceneConfig
-from cloth_fling.sim.backend import GenesisBackend
+from cloth_fling.sim.mesh import square_mesh, write_obj
+from cloth_fling.sim.native_contact import ENGINE_VERSION, install_native_contact
 
 pytestmark = [
     pytest.mark.gpu,
@@ -16,12 +19,57 @@ pytestmark = [
 ]
 
 
-def test_native_impulse_microtests(tmp_path):
+@contextmanager
+def native_contact_scene(config, directory):
+    """Direct 1.4.4 physics coupon; independent of the separate rendering port."""
     import genesis as gs
-    import quadrants as qd
 
+    assert gs.__version__ == ENGINE_VERSION
     if not gs._initialized:
-        gs.init(backend=gs.cuda, seed=0, logging_level="warning")
+        gs.init(backend=gs.cuda, precision="32", seed=0, logging_level="warning")
+    assert gs.backend == gs.cuda and gs.device.type == "cuda"
+    rest, faces = square_mesh(config.cloth_size_m, config.mesh_spacing_m)
+    path = directory / "coupon.obj"
+    write_obj(path, rest, faces)
+    scene = gs.Scene(
+        sim_options=gs.options.SimOptions(dt=config.sim_dt, substeps=4),
+        rigid_options=gs.options.RigidOptions(use_gjk_collision=True),
+        coupler_options=gs.options.LegacyCouplerOptions(),
+        pbd_options=gs.options.PBDOptions(
+            particle_size=config.mesh_spacing_m,
+            max_stretch_solver_iterations=config.max_stretch_solver_iterations,
+        ),
+        show_viewer=False,
+    )
+    try:
+        table = scene.add_entity(
+            gs.morphs.Box(size=(1.2, 1.2, 0.04), pos=(0, 0, -0.02), fixed=True)
+        )
+        scene.add_entity(
+            gs.morphs.Mesh(file=str(path), pos=(0, 0, config.mesh_spacing_m / 2 + 0.001)),
+            material=gs.materials.PBD.Cloth(
+                rho=config.areal_density_kg_m2,
+                stretch_compliance=config.stretch_compliance,
+                bending_compliance=config.bending_compliance,
+                static_friction=config.static_friction,
+                kinetic_friction=config.kinetic_friction,
+                air_resistance=config.air_resistance,
+            ),
+        )
+        coupler = install_native_contact(scene, table, config)
+        scene.build()
+        yield SimpleNamespace(
+            scene=scene,
+            particle_diameter=config.mesh_spacing_m,
+            substeps=4,
+            take_contact_accounting=coupler.take_contact_accounting,
+        )
+    finally:
+        scene.destroy()
+
+
+def test_native_impulse_microtests(tmp_path):
+    import quadrants as qd
     from genesis.engine.couplers.legacy_coupler import LegacyCoupler
     from genesis.utils import array_class
 
@@ -35,7 +83,7 @@ def test_native_impulse_microtests(tmp_path):
         geoms_info: array_class.GeomsInfo,
         links_state: array_class.LinksState,
         sdf_info: array_class.SDFInfo,
-        rigid_global_info: array_class.RigidGlobalInfo,
+        rigid_info: array_class.RigidInfo,
         collider_static_config: qd.template(),
     ):
         for k in range(inputs.shape[0]):
@@ -57,7 +105,7 @@ def test_native_impulse_microtests(tmp_path):
                 geoms_info,
                 links_state,
                 sdf_info,
-                rigid_global_info,
+                rigid_info,
                 collider_static_config,
             )
             p1, v1, n1 = c._func_pbd_collide_with_rigid_geom(
@@ -72,7 +120,7 @@ def test_native_impulse_microtests(tmp_path):
                 geoms_info,
                 links_state,
                 sdf_info,
-                rigid_global_info,
+                rigid_info,
                 collider_static_config,
             )
             for axis in qd.static(range(3)):
@@ -84,9 +132,9 @@ def test_native_impulse_microtests(tmp_path):
                 out[k, 5, axis] = n1[axis]
 
     cfg = SceneConfig(
-        contact_profile="native_coulomb_v1", cloth_size_m=0.1, mesh_spacing_m=0.02, image_size=32
+        contact_profile="native_coulomb_v2", cloth_size_m=0.1, mesh_spacing_m=0.02, image_size=32
     )
-    with GenesisBackend(cfg) as env:
+    with native_contact_scene(cfg, tmp_path) as env:
         radius, dt = env.particle_diameter / 2, cfg.sim_dt / env.substeps
         inputs = np.array(
             [
@@ -108,12 +156,12 @@ def test_native_impulse_microtests(tmp_path):
             env.scene.sim.coupler,
             inputs,
             out,
-            rigid.geoms_state,
-            rigid.geoms_info,
-            rigid.links_state,
+            rigid.dyn_state.geoms,
+            rigid.dyn_info.geoms,
+            rigid.dyn_state.links,
             rigid.collider._sdf._sdf_info,
-            rigid._rigid_global_info,
-            rigid.collider._collider_static_config,
+            rigid._rigid_info,
+            rigid.collider.collider_config,
         )
         np.testing.assert_array_equal(out[:, 0], out[:, 2])
         np.testing.assert_allclose(out[:, 1, 2], out[:, 3, 2], atol=1e-6, rtol=0)
@@ -151,12 +199,12 @@ def test_native_impulse_microtests(tmp_path):
             env.scene.sim.coupler,
             inputs,
             again,
-            rigid.geoms_state,
-            rigid.geoms_info,
-            rigid.links_state,
+            rigid.dyn_state.geoms,
+            rigid.dyn_info.geoms,
+            rigid.dyn_state.links,
             rigid.collider._sdf._sdf_info,
-            rigid._rigid_global_info,
-            rigid.collider._collider_static_config,
+            rigid._rigid_info,
+            rigid.collider.collider_config,
         )
         np.testing.assert_array_equal(again, out)  # Logging cannot affect physics.
         second = env.take_contact_accounting()

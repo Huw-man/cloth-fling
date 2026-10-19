@@ -28,6 +28,8 @@ class SceneConfig:
     air_resistance: float = 0.0
     image_size: int = 256
     seed: int = 0
+    # Retain the omitted-profile archive decoder. New simulation callers must
+    # explicitly select native_coulomb_v2; GenesisBackend rejects both v1 laws.
     contact_profile: str = "legacy_mg_v1"
     table_static_friction: float | None = None
     table_kinetic_friction: float | None = None
@@ -77,7 +79,7 @@ class SceneConfig:
             raise ValueError("max_stretch_solver_iterations must be an integer in [1, 128]")
         if not isinstance(self.table_friction, bool):
             raise ValueError("table_friction must be a boolean")
-        if self.contact_profile not in ("legacy_mg_v1", "native_coulomb_v1"):
+        if self.contact_profile not in ("legacy_mg_v1", "native_coulomb_v1", "native_coulomb_v2"):
             raise ValueError("unsupported contact_profile")
         for name in ("table_static_friction", "table_kinetic_friction"):
             value = getattr(self, name)
@@ -86,7 +88,7 @@ class SceneConfig:
             ):
                 raise ValueError(f"{name} must be finite and nonnegative or None")
         if (
-            self.contact_profile == "native_coulomb_v1"
+            self.contact_profile in ("native_coulomb_v1", "native_coulomb_v2")
             or self.table_static_friction is not None
             or self.table_kinetic_friction is not None
         ) and self.table_coefficients[1] > self.table_coefficients[0]:
@@ -97,7 +99,7 @@ class SceneConfig:
         """Table coefficients, separate from PBD cloth/self-contact coefficients."""
         defaults = (
             (0.40, 0.30)
-            if self.contact_profile == "native_coulomb_v1"
+            if self.contact_profile in ("native_coulomb_v1", "native_coulomb_v2")
             else (self.static_friction, self.kinetic_friction)
         )
         return tuple(

@@ -1,4 +1,4 @@
-"""One-owner Genesis 0.4.3 PBD scene with explicit particle assistance.
+"""One-owner Genesis 1.4.4 PBD scene with explicit particle assistance.
 
 Genesis and torch are imported only when constructing a backend. No learned
 policy should consume the depth, mesh, calibration, or snapshots exposed here.
@@ -25,6 +25,7 @@ from cloth_fling.sim.mesh import (
     square_mesh,
     write_obj,
 )
+from cloth_fling.sim.native_contact import _SOURCE_HASHES, CONTACT_PROFILE, ENGINE_VERSION
 from cloth_fling.sim.render_mesh import PhysicsMeshRendering
 
 
@@ -53,7 +54,7 @@ class GenesisBackend:
     ``faces``, ``edges``, ``rest_positions`` and ``rest_edge_lengths`` use the
     runtime particle order. ``calibration`` is JSON serializable, with OpenCV
     camera axes (right, down, forward), pixel centres at (u+.5,v+.5).
-    ``substeps=4`` is fixed and qualified against the installed solver.
+    ``substeps=4`` is fixed; historical 0.4.3 qualification does not transfer.
     """
 
     substeps = 4
@@ -80,26 +81,35 @@ class GenesisBackend:
             os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
         import genesis as gs
 
+        if gs.__version__ != ENGINE_VERSION:
+            raise RuntimeError(f"runtime requires Genesis {ENGINE_VERSION}; got {gs.__version__}")
         self._gs = gs
         requested = gs.cuda if backend == "gpu" else gs.cpu
         if not gs._initialized:
             # Request CUDA explicitly: gs.gpu silently permits a CPU fallback.
-            gs.init(backend=requested, seed=config.seed, logging_level="warning")
+            gs.init(backend=requested, precision="32", seed=config.seed, logging_level="warning")
         if gs.backend != requested or (backend == "gpu" and gs.device.type != "cuda"):
             raise RuntimeError("Genesis runtime backend differs from requested backend")
+        if gs.np_float != np.float32:
+            raise RuntimeError("Genesis runtime requires 32-bit precision")
+        self._runtime_settings = {
+            "array_mode": "ndarray" if gs.use_ndarray else "field",
+            "deterministic_algorithms": bool(gs.use_deterministic_algorithms),
+        }
         self._temporary = tempfile.TemporaryDirectory(prefix="cloth-fling-mesh-")
         self.scene = None
         try:
             rest, faces = square_mesh(config.cloth_size_m, config.mesh_spacing_m)
             path = os.path.join(self._temporary.name, "cloth.obj")
             write_obj(path, rest, faces)
-            # 0.4.3 ALWAYS isotropically remeshes PBD cloth to particle_size.
+            # 1.4.4 PBD2DEntity isotropically remeshes cloth to particle_size.
             # This is both target edge spacing and collision particle diameter.
             self.particle_diameter = config.mesh_spacing_m
             self._initial_height = self.particle_diameter / 2 + 0.001
             self.scene = gs.Scene(
                 sim_options=gs.options.SimOptions(dt=config.sim_dt, substeps=self.substeps),
                 rigid_options=gs.options.RigidOptions(use_gjk_collision=True),
+                coupler_options=gs.options.LegacyCouplerOptions(),
                 pbd_options=gs.options.PBDOptions(
                     max_stretch_solver_iterations=config.max_stretch_solver_iterations,
                     particle_size=self.particle_diameter,
@@ -146,7 +156,7 @@ class GenesisBackend:
                 GUI=False,
             )
             self._physics_mesh_rendering = PhysicsMeshRendering(self.scene, self.cloth, gs)
-            if config.contact_profile == "native_coulomb_v1":
+            if config.contact_profile == CONTACT_PROFILE:
                 from cloth_fling.sim.native_contact import install_native_contact
 
                 install_native_contact(self.scene, table, config)
@@ -208,6 +218,12 @@ class GenesisBackend:
 
     @staticmethod
     def _validate_config(config: SceneConfig) -> None:
+        if config.contact_profile != CONTACT_PROFILE:
+            raise ValueError(
+                f"contact profile {config.contact_profile!r} is archival only; Genesis "
+                f"{ENGINE_VERSION} simulation requires {CONTACT_PROFILE}. Select a v2 config "
+                "explicitly; archived v1 evidence has not been requalified."
+            )
         data = config.to_dict()
         if not all(
             np.isfinite(value) for value in data.values() if isinstance(value, (int, float))
@@ -248,6 +264,47 @@ class GenesisBackend:
     def _ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("backend is closed")
+
+    def _ensure_physics(self) -> None:
+        self._ensure_open()
+        if getattr(self, "_render_only", False):
+            raise RuntimeError(
+                "recorded-geometry backend is render-only; create a fresh physics scene"
+            )
+
+    @property
+    def runtime_identity(self) -> dict[str, Any]:
+        """JSON metadata for the configured physics, independent of appearance.
+
+        Identity is a compatibility boundary, never a qualification result.
+        Returned dictionaries are copies and cannot alter snapshot validation.
+        """
+        return {
+            "engine": "genesis",
+            "engine_version": ENGINE_VERSION,
+            "physics_schema_version": 2,
+            "solver": "PBD",
+            "coupler": "LegacyCoupler+NativeTableCoupler",
+            "contact_profile": self.config.contact_profile,
+            "native_source_sha256_ast": dict(_SOURCE_HASHES),
+            "sim_dt": self.config.sim_dt,
+            "substeps": self.substeps,
+            "max_stretch_solver_iterations": self.config.max_stretch_solver_iterations,
+            "precision": "32",
+            **self._runtime_settings,
+        }
+
+    @property
+    def capabilities(self) -> dict[str, Any]:
+        return {
+            "physical_snapshot_schema": 2,
+            "physical_restore": not getattr(self, "_render_only", False),
+            "recorded_geometry_restore": "exact_rest_mesh_only",
+            "native_contact_accounting": True,
+            "contact_qualification": "unqualified_on_1.4.4",
+            "assisted_attachment": True,
+            "render_only": getattr(self, "_render_only", False),
+        }
 
     def _dirty(self) -> None:
         self._observation = None
@@ -303,6 +360,8 @@ class GenesisBackend:
                 "simulated_time": self.simulated_time,
                 "config_hash": self._config_hash,
                 "mesh_hash": self._mesh_hash,
+                "runtime_identity_json": _json(self.runtime_identity),
+                "render_only": getattr(self, "_render_only", False),
                 "rgb": rgb,
                 "depth": depth,
             }
@@ -314,7 +373,7 @@ class GenesisBackend:
         )
 
     def attach(self, pixels: tuple[tuple[float, float], tuple[float, float]]) -> tuple[int, int]:
-        self._ensure_open()
+        self._ensure_physics()
         if self.attached_ids:
             raise ValueError("release existing attachments before attaching")
         ids = resolve_grasps(
@@ -334,7 +393,7 @@ class GenesisBackend:
         return ids
 
     def set_attachment_targets(self, targets: np.ndarray) -> None:
-        self._ensure_open()
+        self._ensure_physics()
         values = np.asarray(targets, dtype=np.float64)
         if not self.attached_ids or values.shape != (len(self.attached_ids), 3):
             raise ValueError("targets must match the active attachment IDs")
@@ -349,7 +408,7 @@ class GenesisBackend:
         self._targets = values.copy()
 
     def step(self, count: int = 1) -> None:
-        self._ensure_open()
+        self._ensure_physics()
         if not isinstance(count, int) or count < 0:
             raise ValueError("step count must be a nonnegative integer")
         for _ in range(count):
@@ -395,7 +454,7 @@ class GenesisBackend:
         then starts a new one. Ordinary reset/restore never clears these counters.
         """
         self._ensure_open()
-        if self.config.contact_profile != "native_coulomb_v1":
+        if self.config.contact_profile != CONTACT_PROFILE:
             return {"schema_version": 1, "profile": "legacy_mg_v1", "available": False}
         return self.scene.sim.coupler.take_contact_accounting(reset=reset)
 
@@ -412,9 +471,13 @@ class GenesisBackend:
         return area / self._flat_area, area, self._flat_area
 
     def snapshot(self) -> dict[str, Any]:
-        self._ensure_open()
+        self._ensure_physics()
         state = {
-            "schema_version": 1,
+            "schema_version": 2,
+            "engine": "genesis",
+            "engine_version": ENGINE_VERSION,
+            "runtime_identity_json": _json(self.runtime_identity),
+            "substeps": self.substeps,
             "positions": self.get_positions(),
             "velocities": self.get_velocities(),
             "free": self._free(),
@@ -432,19 +495,27 @@ class GenesisBackend:
         return state
 
     def restore(self, state: dict[str, Any]) -> Observation:
-        self._ensure_open()
+        self._ensure_physics()
         # Accept np.load(..., allow_pickle=False) scalar values as well as JSON metadata.
         state = {
             k: (v.item() if isinstance(v, np.ndarray) and v.ndim == 0 else v)
             for k, v in state.items()
         }
+        if state.get("schema_version") != 2:
+            raise ValueError(
+                "physical restore requires schema 2 and Genesis 1.4.4 runtime identity; "
+                "schema-1 Genesis 0.4.3 states are archival only"
+            )
         required = set(self.snapshot())
         if set(state) != required:
             raise ValueError("snapshot fields differ from schema")
         if state["state_hash"] != _state_hash(state):
             raise ValueError("snapshot content hash mismatch")
         if (
-            state["schema_version"] != 1
+            state["engine"] != "genesis"
+            or state["engine_version"] != ENGINE_VERSION
+            or state["runtime_identity_json"] != _json(self.runtime_identity)
+            or state["substeps"] != self.substeps
             or state["config_json"] != self._config_json
             or state["config_hash"] != self._config_hash
             or state["mesh_hash"] != self._mesh_hash
@@ -494,8 +565,61 @@ class GenesisBackend:
             raise RuntimeError("snapshot restore readback failed")
         return self.observe()
 
-    def reset(self, seed: int = 0, *, kind: str = "drop") -> Observation:
+    def restore_recorded_geometry(self, state: dict[str, Any]) -> Observation:
+        """Render an archive on an exactly identical rest mesh, without stepping.
+
+        This irreversibly latches this backend into render-only mode. It does
+        not restore physical state, claim engine compatibility, remesh recorded
+        geometry, or carry v1 qualification into v2. Replay may update positions
+        with the entity setter after this check, but must never call step/reset.
+        A different triangulation/order requires another rendering strategy.
+        """
         self._ensure_open()
+        state = {
+            k: (v.item() if isinstance(v, np.ndarray) and v.ndim == 0 else v)
+            for k, v in state.items()
+        }
+        if state.get("schema_version") not in (1, 2):
+            raise ValueError("unsupported recorded geometry schema")
+        if state.get("state_hash") != _state_hash(state):
+            raise ValueError("recorded geometry content hash mismatch")
+        if state.get("mesh_hash") != self._mesh_hash:
+            raise ValueError("recorded geometry mesh identity mismatch; conversion is unsupported")
+        for key in ("faces", "edges", "rest_positions"):
+            if key not in state or not np.array_equal(state[key], getattr(self, key)):
+                raise ValueError(f"recorded geometry {key} mismatch; conversion is unsupported")
+        positions = np.asarray(state["positions"])
+        time = state["simulated_time"]
+        if (
+            positions.shape != self.rest_positions.shape
+            or not np.isfinite(positions).all()
+            or not np.isfinite(time)
+            or time < 0
+        ):
+            raise ValueError("invalid recorded geometry arrays or time")
+        # Latch before any mutation: a failed device setter cannot leave a
+        # partially imported archive usable as a physical initial condition.
+        self._render_only = True
+        self.release()
+        self.cloth.release_particle()
+        self.cloth.set_particles_pos(positions)
+        self.cloth.set_particles_vel(np.zeros_like(positions))
+        self.simulated_time = float(time)
+        self.reset_metadata = {"kind": "recorded_geometry", "physical_restore": False}
+        self.recorded_geometry_identity = {
+            "source_state_hash": state["state_hash"],
+            "source_schema_version": state["schema_version"],
+            "source_engine_version": state.get("engine_version", "0.4.3"),
+            "render_engine_version": ENGINE_VERSION,
+            "mesh_conversion": False,
+        }
+        self._dirty()
+        if not np.allclose(self.get_positions(), positions, atol=1e-7, rtol=0):
+            raise RuntimeError("recorded geometry readback failed")
+        return self.observe()
+
+    def reset(self, seed: int = 0, *, kind: str = "drop") -> Observation:
+        self._ensure_physics()
         if kind not in ("flat", "drop", "fold"):
             raise ValueError("reset kind must be flat, drop or fold")
         rng = np.random.default_rng(seed)
