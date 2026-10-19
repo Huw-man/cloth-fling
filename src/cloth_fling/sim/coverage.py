@@ -27,8 +27,13 @@ class CoverageGrid:
         faces = np.asarray(faces)
         if positions.ndim != 2 or positions.shape[1] != 3 or not np.isfinite(positions).all():
             raise ValueError("positions must be finite (N,3)")
-        if (faces.ndim != 2 or faces.shape[1] != 3 or faces.dtype.kind not in "iu"
-                or np.any(faces < 0) or np.any(faces >= len(positions))):
+        if (
+            faces.ndim != 2
+            or faces.shape[1] != 3
+            or faces.dtype.kind not in "iu"
+            or np.any(faces < 0)
+            or np.any(faces >= len(positions))
+        ):
             raise ValueError("invalid triangle indices")
         result = np.zeros((self.n, self.n), dtype=bool)
         for tri in positions[faces, :2]:
@@ -39,19 +44,21 @@ class CoverageGrid:
                 continue
             lo = np.searchsorted(self.centres, tri.min(axis=0), side="left")
             hi = np.searchsorted(self.centres, tri.max(axis=0), side="right")
-            x = self.centres[lo[0]:hi[0]][None, :] - a[0]
-            y = self.centres[lo[1]:hi[1]][:, None] - a[1]
+            x = self.centres[lo[0] : hi[0]][None, :] - a[0]
+            y = self.centres[lo[1] : hi[1]][:, None] - a[1]
             u = (x * f[1] - y * f[0]) / det
             v = (e[0] * y - e[1] * x) / det
-            result[lo[1]:hi[1], lo[0]:hi[0]] |= (
-                (u >= -1e-10) & (v >= -1e-10) & (u + v <= 1 + 1e-10))
+            result[lo[1] : hi[1], lo[0] : hi[0]] |= (
+                (u >= -1e-10) & (v >= -1e-10) & (u + v <= 1 + 1e-10)
+            )
         return result
 
     def area(self, positions: np.ndarray, faces: np.ndarray) -> float:
         return float(self.mask(positions, faces).sum() * self.cell_size**2)
 
-    def measure(self, positions: np.ndarray, faces: np.ndarray,
-                rest_positions: np.ndarray) -> tuple[float, float, float]:
+    def measure(
+        self, positions: np.ndarray, faces: np.ndarray, rest_positions: np.ndarray
+    ) -> tuple[float, float, float]:
         flat = self.area(rest_positions, faces)
         if flat <= 0:
             raise ValueError("flat reference has zero projected area")

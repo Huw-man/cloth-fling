@@ -17,15 +17,19 @@ from cloth_fling.sim.mesh import (
 
 
 def calibration(size=101):
-    return {"intrinsics": [[100, 0, 50.5], [0, 100, 50.5], [0, 0, 1]],
-            "camera_to_world": [[1, 0, 0, 0], [0, -1, 0, 0],
-                                [0, 0, -1, 1], [0, 0, 0, 1]],
-            "image_size": [size, size], "pixel_center_offset": 0.5}
+    return {
+        "intrinsics": [[100, 0, 50.5], [0, 100, 50.5], [0, 0, 1]],
+        "camera_to_world": [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 1], [0, 0, 0, 1]],
+        "image_size": [size, size],
+        "pixel_center_offset": 0.5,
+    }
 
 
 def test_import_does_not_load_simulator():
-    code = ("import sys; import cloth_fling.sim.backend; "
-            "assert 'genesis' not in sys.modules; assert 'torch' not in sys.modules")
+    code = (
+        "import sys; import cloth_fling.sim.backend; "
+        "assert 'genesis' not in sys.modules; assert 'torch' not in sys.modules"
+    )
     subprocess.run([sys.executable, "-c", code], check=True)
 
 
@@ -46,7 +50,7 @@ def test_square_topology_and_hash():
     assert mesh_identity(p, f) != mesh_identity(moved, f)
 
 
-@pytest.mark.parametrize("size,spacing", [(0, .01), (.5, -1), (np.nan, .1)])
+@pytest.mark.parametrize("size,spacing", [(0, 0.01), (0.5, -1), (np.nan, 0.1)])
 def test_invalid_mesh(size, spacing):
     with pytest.raises(ValueError):
         square_mesh(size, spacing)
@@ -66,38 +70,38 @@ def test_camera_pixel_centres_and_axes():
 def test_nearest_surface_and_hidden_layer():
     # Hidden layer has a vertex exactly under the ray. The upper triangle's
     # vertices are further away but MUST be chosen from that visible layer.
-    top = np.array([[-.1, -.1, .2], [.1, -.1, .2], [0, .1, .2]])
-    hidden = np.array([[0, 0, .19], [.2, -.2, .19], [-.2, -.2, .19]])
+    top = np.array([[-0.1, -0.1, 0.2], [0.1, -0.1, 0.2], [0, 0.1, 0.2]])
+    hidden = np.array([[0, 0, 0.19], [0.2, -0.2, 0.19], [-0.2, -0.2, 0.19]])
     p = np.concatenate((hidden, top))
     f = np.array([[0, 1, 2], [3, 4, 5]])
     hit, face = ray_surface_hit(np.array([0, 0, 1]), np.array([0, 0, -1]), p, f)
     assert face == 1
-    np.testing.assert_allclose(hit, [0, 0, .2])
-    assert visible_particle((50, 50), p, f, calibration(), .15) == 5
+    np.testing.assert_allclose(hit, [0, 0, 0.2])
+    assert visible_particle((50, 50), p, f, calibration(), 0.15) == 5
     with pytest.raises(ValueError, match="radius"):
-        visible_particle((50, 50), p, f, calibration(), .02)
+        visible_particle((50, 50), p, f, calibration(), 0.02)
     with pytest.raises(ValueError, match="hit"):
-        visible_particle((100, 0), p, f, calibration(), .15)
+        visible_particle((100, 0), p, f, calibration(), 0.15)
 
 
 def test_visible_distance_tie_breaks_by_id():
-    p = np.array([[-.1, -.1, 0], [.1, -.1, 0], [.1, .1, 0], [-.1, .1, 0]])
+    p = np.array([[-0.1, -0.1, 0], [0.1, -0.1, 0], [0.1, 0.1, 0], [-0.1, 0.1, 0]])
     f = np.array([[0, 1, 2], [0, 2, 3]])
-    assert visible_particle((50, 50), p, f, calibration(), .2) == 0
+    assert visible_particle((50, 50), p, f, calibration(), 0.2) == 0
 
 
 def test_pair_validation():
-    p, f = square_mesh(.5, .05)
-    options = {"radius": .08, "workspace": .9, "min_separation": .08, "max_separation": .55}
+    p, f = square_mesh(0.5, 0.05)
+    options = {"radius": 0.08, "workspace": 0.9, "min_separation": 0.08, "max_separation": 0.55}
     pair = ((30, 50), (70, 50))
     ids = resolve_grasps(pair, p, f, calibration(), **options)
     assert ids[0] != ids[1]
     with pytest.raises(ValueError, match="coincident"):
         resolve_grasps(((50, 50), (50, 50)), p, f, calibration(), **options)
     with pytest.raises(ValueError, match="workspace"):
-        resolve_grasps(pair, p, f, calibration(), **(options | {"workspace": .1}))
+        resolve_grasps(pair, p, f, calibration(), **(options | {"workspace": 0.1}))
     with pytest.raises(ValueError, match="separation"):
-        resolve_grasps(pair, p, f, calibration(), **(options | {"max_separation": .1}))
+        resolve_grasps(pair, p, f, calibration(), **(options | {"max_separation": 0.1}))
     with pytest.raises(ValueError):
         resolve_grasps(((50, 50),), p, f, calibration(), **options)
 
@@ -105,5 +109,6 @@ def test_pair_validation():
 def test_config_validation_before_genesis_import():
     module = importlib.import_module("cloth_fling.sim.backend")
     from cloth_fling.contracts import SceneConfig
+
     with pytest.raises(ValueError):
         module.GenesisBackend(SceneConfig(sim_dt=-1))

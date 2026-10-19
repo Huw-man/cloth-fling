@@ -28,9 +28,7 @@ def _fingerprint(env):
         digest.update(str((array.shape, str(array.dtype))).encode())
         digest.update(array.tobytes())
     digest.update(
-        repr(
-            (float(env.simulated_time), tuple(env.attached_ids), tuple(env.coverage()))
-        ).encode()
+        repr((float(env.simulated_time), tuple(env.attached_ids), tuple(env.coverage()))).encode()
     )
     return digest.hexdigest()
 
@@ -69,9 +67,7 @@ def _save_fixture(directory, fixture):
 
     metadata = split(fixture)
     np.savez_compressed(directory / "fixture.npz", **arrays)
-    (directory / "fixture.json").write_text(
-        json.dumps(metadata, indent=2, allow_nan=False) + "\n"
-    )
+    (directory / "fixture.json").write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n")
     return {"metadata": "fixture.json", "arrays": "fixture.npz"}
 
 
@@ -86,18 +82,14 @@ def _save_observations(directory, primitive, outcome):
         rgb = np.asarray(obs.rgb)
         if np.issubdtype(rgb.dtype, np.floating) and rgb.max(initial=0) <= 1:
             rgb = rgb * 255
-        Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8)).save(
-            directory / filename
-        )
+        Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8)).save(directory / filename)
         references[f"{name}_rgb"] = filename
         if obs.depth is not None:
             depths[name] = obs.depth
         cameras[name] = _json_safe(obs.calibration)
     depth_file, camera_file = f"{primitive}_depth.npz", f"{primitive}_camera.json"
     np.savez_compressed(directory / depth_file, **depths)
-    (directory / camera_file).write_text(
-        json.dumps(cameras, indent=2, allow_nan=False) + "\n"
-    )
+    (directory / camera_file).write_text(json.dumps(cameras, indent=2, allow_nan=False) + "\n")
     references.update(depth=depth_file, calibration=camera_file)
     return references
 
@@ -158,9 +150,7 @@ def run_diagnostic(
                 rng=np.random.default_rng(seed),
             )
         else:
-            report["pair_selection"] = (
-                "manual_fixed_pair; privileged depth execution feasibility"
-            )
+            report["pair_selection"] = "manual_fixed_pair; privileged depth execution feasibility"
         if directory is not None:
             directory.mkdir(parents=True, exist_ok=True)
             report["fixture_artifacts"] = _save_fixture(directory, fixture)
@@ -176,9 +166,7 @@ def run_diagnostic(
                 raise ValueError(f"fixture_restore_mismatch_before_{primitive}")
             outcome = execute_action(env, replace(action, primitive=primitive), c)
             artifacts = (
-                _save_observations(directory, primitive, outcome)
-                if directory is not None
-                else {}
+                _save_observations(directory, primitive, outcome) if directory is not None else {}
             )
             report["runs"].append(
                 {

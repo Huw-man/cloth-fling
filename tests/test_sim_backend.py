@@ -60,13 +60,13 @@ class Cloth:
 @pytest.fixture
 def backend():
     b = object.__new__(GenesisBackend)
-    b.config = SceneConfig(image_size=16, mesh_spacing_m=.25)
+    b.config = SceneConfig(image_size=16, mesh_spacing_m=0.25)
     b._config_json = _json(b.config.to_dict())
     b._config_hash = hashlib.sha256(b._config_json.encode()).hexdigest()
-    b.rest_positions, b.faces = square_mesh(.5, .25)
+    b.rest_positions, b.faces = square_mesh(0.5, 0.25)
     b.edges = mesh_edges(b.faces)
     b._mesh_hash = mesh_identity(b.rest_positions, b.faces)
-    b.cloth = Cloth(b.rest_positions + [0, 0, .05])
+    b.cloth = Cloth(b.rest_positions + [0, 0, 0.05])
     b._closed = False
     b._observation = None
     b._render_buffers_ready = False
@@ -74,11 +74,11 @@ def backend():
     b.attached_ids = ()
     b.simulated_time = 1.0
     b.reset_metadata = {"kind": "fixture"}
-    b.particle_diameter = .01
-    b._initial_height = .006
+    b.particle_diameter = 0.01
+    b._initial_height = 0.006
     b.calibration = {"test": "fixture"}
     b._grid = CoverageGrid()
-    b._flat_area = .25
+    b._flat_area = 0.25
 
     def step():
         for _ in range(b.substeps):
@@ -86,10 +86,17 @@ def backend():
 
     b.scene = SimpleNamespace(
         pbd_solver=SimpleNamespace(get_state=lambda _: SimpleNamespace(free=Tensor(b.cloth.free))),
-        sim=SimpleNamespace(cur_substep_local=0), step=step)
-    b.camera = SimpleNamespace(render=lambda **_: (
-        np.full((16, 16, 3), 100, dtype=np.uint8),
-        np.ones((16, 16), dtype=np.float32), None, None))
+        sim=SimpleNamespace(cur_substep_local=0),
+        step=step,
+    )
+    b.camera = SimpleNamespace(
+        render=lambda **_: (
+            np.full((16, 16, 3), 100, dtype=np.uint8),
+            np.ones((16, 16), dtype=np.float32),
+            None,
+            None,
+        )
+    )
     return b
 
 
@@ -98,13 +105,12 @@ def test_only_attached_velocity_commands_and_release_momentum(backend):
     b.attached_ids = (0, 2)
     b.cloth.fix_particles([0, 2], zero_velocity=False)
     start = b.get_positions()
-    target = start[[0, 2]] + [0, 0, .002]
+    target = start[[0, 2]] + [0, 0, 0.002]
     b.set_attachment_targets(target)
     assert b.cloth.writes == []  # Targets alone never advance physics.
     b.step()
     np.testing.assert_allclose(b.get_positions()[[0, 2]], target, atol=1e-7)
-    np.testing.assert_equal(b.get_positions()[[1, 3, 4, 5, 6, 7, 8]],
-                            start[[1, 3, 4, 5, 6, 7, 8]])
+    np.testing.assert_equal(b.get_positions()[[1, 3, 4, 5, 6, 7, 8]], start[[1, 3, 4, 5, 6, 7, 8]])
     assert b.cloth.writes == [("velocity", [0, 2])]
     velocity = b.get_velocities()
     b.release()
@@ -118,15 +124,14 @@ def test_only_attached_velocity_commands_and_release_momentum(backend):
 def test_next_step_target_then_hold(backend):
     b = backend
     b.attached_ids = (0, 2)
-    target = b.get_positions()[[0, 2]] + [0, 0, .002]
+    target = b.get_positions()[[0, 2]] + [0, 0, 0.002]
     b.set_attachment_targets(target)
     b.step(3)
     np.testing.assert_allclose(b.get_positions()[[0, 2]], target, atol=1e-7)
     np.testing.assert_allclose(b.get_velocities()[[0, 2]], 0, atol=1e-5)
 
 
-@pytest.mark.parametrize("value", [np.zeros((1, 3)), np.full((2, 3), np.nan),
-                                   np.full((2, 3), 5)])
+@pytest.mark.parametrize("value", [np.zeros((1, 3)), np.full((2, 3), np.nan), np.full((2, 3), 5)])
 def test_bad_targets_do_not_write(backend, value):
     backend.attached_ids = (0, 2)
     with pytest.raises(ValueError):
@@ -166,7 +171,7 @@ def test_invalid_restore_rejected_before_writes(backend, corrupt):
     b = backend
     state = b.snapshot()
     if corrupt == "content":
-        state["positions"][0, 0] += .001
+        state["positions"][0, 0] += 0.001
     elif corrupt == "shape":
         state["velocities"] = np.zeros((2, 3))
     elif corrupt == "config":
@@ -194,7 +199,7 @@ def test_observation_array_isolation_and_content_identity(backend):
     assert two.rgb.min() == 100 and two.depth.min() == 1
     assert two.calibration == {"test": "fixture"}
     assert one.observation_id == two.observation_id
-    b.cloth.p[0, 0] += .01
+    b.cloth.p[0, 0] += 0.01
     b._dirty()
     assert b.observe().observation_id != two.observation_id
 
@@ -232,9 +237,9 @@ def test_reset_failure_is_explicit_and_clears_attachments(backend, failure):
     def invalid_step():
         b.simulated_time += b.config.sim_dt
         if failure == "escaped":
-            b.cloth.p[0, 0] = .7
+            b.cloth.p[0, 0] = 0.7
         else:
-            b.cloth.v[:] = [.02, 0, 0]
+            b.cloth.v[:] = [0.02, 0, 0]
 
     b.step = invalid_step
     with pytest.raises(InvalidResetError):
@@ -244,6 +249,6 @@ def test_reset_failure_is_explicit_and_clears_attachments(backend, failure):
     assert b.attached_ids == () and b._free().all()
     if failure == "timeout":
         assert b.simulated_time == pytest.approx(10)
-        assert b.reset_metadata["final_rms_speed_m_s"] > .01
+        assert b.reset_metadata["final_rms_speed_m_s"] > 0.01
     else:
-        assert b.cloth.p[0, 0] == pytest.approx(.7)  # No fallback/cleanup reset.
+        assert b.cloth.p[0, 0] == pytest.approx(0.7)  # No fallback/cleanup reset.

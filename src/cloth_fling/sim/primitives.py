@@ -179,9 +179,7 @@ def _trajectory(points, durations, speed, acceleration):
     durations = np.asarray(durations, dtype=float)
     tangents = np.zeros_like(points)
     for i in range(1, len(points) - 1):
-        tangents[i] = (points[i + 1] - points[i - 1]) / (
-            durations[i - 1] + durations[i]
-        )
+        tangents[i] = (points[i + 1] - points[i - 1]) / (durations[i - 1] + durations[i])
         # A constant-height drag needs zero vertical tangent at the join, while
         # keeping its horizontal pass-through tangent. This prevents table undershoot.
         plateau = (points[i, :, 2] == points[i - 1, :, 2]) | (
@@ -266,10 +264,7 @@ class _Execution:
         if self.geometry is not None:
             edges, lengths = self.geometry
             strain = float(
-                np.max(
-                    np.linalg.norm(p[edges[:, 0]] - p[edges[:, 1]], axis=1) / lengths
-                    - 1
-                )
+                np.max(np.linalg.norm(p[edges[:, 0]] - p[edges[:, 1]], axis=1) / lengths - 1)
             )
             self.max_strain = max(self.max_strain or 0, strain)
             if strain > self.c.max_strain + 1e-6:
@@ -278,9 +273,7 @@ class _Execution:
         if force or now - self.last_trace >= self.c.trace_interval_seconds - 1e-9:
             coverage, area, _ = _coverage(self.env)
             if phase == "settle":
-                self.peak_settle_coverage = max(
-                    self.peak_settle_coverage or coverage, coverage
-                )
+                self.peak_settle_coverage = max(self.peak_settle_coverage or coverage, coverage)
             near_table = p[:, 2] <= self.c.table_height_m + 0.01
             self.trace.append(
                 {
@@ -331,9 +324,7 @@ class _Execution:
                 raise PrimitiveFailure("command_kinematic_limit")
             self.env.set_attachment_targets(target)
             self.command_speed = max(self.command_speed, speed)
-            self.command_acceleration = max(
-                self.command_acceleration, acceleration_norm
-            )
+            self.command_acceleration = max(self.command_acceleration, acceleration_norm)
             self.target = target.copy()
             self.previous_command_velocity = velocity
         previous_time = float(self.env.simulated_time)
@@ -359,9 +350,7 @@ class _Execution:
         phase_index = -1
         for step in range(1, count + 1):
             t = step * self.dt / time_scale
-            index = min(
-                int(np.searchsorted(cumulative, t, side="left")), len(controls) - 1
-            )
+            index = min(int(np.searchsorted(cumulative, t, side="left")), len(controls) - 1)
             if index != phase_index:
                 self.phase(phases[index])
                 phase_index = index
@@ -413,24 +402,18 @@ class _Execution:
                 unit = chord / max(np.linalg.norm(chord), 1e-9)
                 relative = path_points - p[self.ids[0]]
                 sag = float(
-                    np.linalg.norm(
-                        relative - np.outer(relative @ unit, unit), axis=1
-                    ).max()
+                    np.linalg.norm(relative - np.outer(relative @ unit, unit), axis=1).max()
                 )
                 gate = min(gate, sag / self.c.taut_sag_tolerance_m)
             u = step / count
             envelope = 30 * u**2 * (1 - u) ** 2 * (goal - initial_span) / duration
             desired_rate = min(envelope * gate, max(0.0, goal - span) / self.dt)
-            delta = (
-                self.c.max_acceleration_m_s2 * self.dt
-            )  # span acceleration; endpoint half
+            delta = self.c.max_acceleration_m_s2 * self.dt  # span acceleration; endpoint half
             rate += float(np.clip(desired_rate - rate, -delta, delta))
             span += rate * self.dt
             if span > cap + 1e-9:
                 raise PrimitiveFailure("tauten_rest_span_limit")
-            self.step(
-                "tauten", np.array([center - axis * span / 2, center + axis * span / 2])
-            )
+            self.step("tauten", np.array([center - axis * span / 2, center + axis * span / 2]))
         self.step("tauten", self.target)
 
     def settle(self):
@@ -438,8 +421,7 @@ class _Execution:
         start = float(self.env.simulated_time)
         stable = 0.0
         while (
-            float(self.env.simulated_time) - start + self.dt
-            <= self.c.settle_timeout_seconds + 1e-9
+            float(self.env.simulated_time) - start + self.dt <= self.c.settle_timeout_seconds + 1e-9
         ):
             _, v = self.step("settle")
             rms = float(np.sqrt(np.mean(np.sum(v**2, axis=1))))
@@ -536,9 +518,7 @@ def execute_action(
             pulled = start - direction * c.pullback_distance_m
             pulled[:, 2] -= min(0.04, c.lift_height_m / 4)
             lower = start - direction * (c.pullback_distance_m / 2)
-            lower[:, 2] = c.table_height_m + max(
-                c.release_height_m, c.lift_height_m / 4
-            )
+            lower[:, 2] = c.table_height_m + max(c.release_height_m, c.lift_height_m / 4)
             placed = start + direction * c.place_distance_m
             placed[:, 2] = c.table_height_m + c.release_height_m
             run.follow(
@@ -580,9 +560,7 @@ def execute_action(
             if tuple(env.attached_ids):
                 raise PrimitiveFailure("cleanup_left_attachments")
         except Exception as exc:
-            errors.append(
-                {"type": type(exc).__name__, "message": str(exc), "stage": "release"}
-            )
+            errors.append({"type": type(exc).__name__, "message": str(exc), "stage": "release"})
             reason, valid = "release_cleanup_failed", False
     if before is None or coverage_before is None:
         raise PrimitiveFailure(f"initial_capture_failed: {reason}; errors={errors}")
@@ -590,18 +568,14 @@ def execute_action(
         after = env.observe()
         p, v = _state(env)
         coverage_after = _coverage(env)
-        if not math.isclose(
-            coverage_before[2], coverage_after[2], rel_tol=1e-8, abs_tol=1e-12
-        ):
+        if not math.isclose(coverage_before[2], coverage_after[2], rel_tol=1e-8, abs_tol=1e-12):
             raise PrimitiveFailure("flat_reference_changed")
     except Exception as exc:
         after = locals().get("after", before)
         coverage_after = (math.nan, math.nan, coverage_before[2])
         final_observation_valid = False
         reason, valid = f"terminal_capture_failed_{type(exc).__name__}: {exc}", False
-        errors.append(
-            {"type": type(exc).__name__, "message": str(exc), "stage": "terminal"}
-        )
+        errors.append({"type": type(exc).__name__, "message": str(exc), "stage": "terminal"})
         truncated |= isinstance(exc, DeadlineExceeded)
     if run:
         try:
@@ -610,9 +584,7 @@ def execute_action(
             if valid:
                 reason = str(exc)
             valid = False
-            errors.append(
-                {"type": type(exc).__name__, "message": str(exc), "stage": "deadline"}
-            )
+            errors.append({"type": type(exc).__name__, "message": str(exc), "stage": "deadline"})
             truncated |= isinstance(exc, DeadlineExceeded)
     final = coverage_after[0]
     diagnostics = {
@@ -633,9 +605,7 @@ def execute_action(
         "coverage_at_release": run.release_coverage if run else None,
         "release_velocity_delta_max_m_s": run.release_velocity_delta if run else None,
         "coverage_recoil_after_release": (
-            run.release_coverage - final
-            if run and run.release_coverage is not None
-            else None
+            run.release_coverage - final if run and run.release_coverage is not None else None
         ),
         "coverage_recoil_from_settle_peak": (
             max(run.peak_settle_coverage or final, final) - final if run else None

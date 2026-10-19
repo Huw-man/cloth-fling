@@ -32,9 +32,7 @@ def test_perspective_optical_depth_pixel_centers():
     expected[:, 2] = 1 - depth
     np.testing.assert_allclose(world, expected)
     translated = dict(obs.calibration)
-    translated["camera_to_world"] = np.asarray(
-        translated["camera_to_world"], dtype=float
-    ).copy()
+    translated["camera_to_world"] = np.asarray(translated["camera_to_world"], dtype=float).copy()
     translated["camera_to_world"][0, 3] = 0.2
     obs.calibration = translated
     np.testing.assert_allclose(pixels_to_world(obs, uv), expected + [0.2, 0, 0])
@@ -76,9 +74,7 @@ def test_distinct_feasible_deterministic_visible_pairs(policy):
     mask = foreground_mask(obs)
     assert all(mask[int(v), int(u)] for u, v in a.pixels)
     world = pixels_to_world(obs, np.array(a.pixels))
-    assert (
-        env.config.min_grasp_separation_m <= np.linalg.norm(world[1] - world[0]) <= 0.3
-    )
+    assert env.config.min_grasp_separation_m <= np.linalg.norm(world[1] - world[0]) <= 0.3
     assert (np.abs(world[:, :2]) <= 0.45).all()
     if policy == "geometry_guided":
         assert "privileged_depth" in a.policy
@@ -87,8 +83,7 @@ def test_distinct_feasible_deterministic_visible_pairs(policy):
 def test_uniform_rng_changes_choices_not_just_widest_pair():
     obs = observation()
     pairs = {
-        select_action(obs, SceneConfig(), rng=np.random.default_rng(i)).pixels
-        for i in range(10)
+        select_action(obs, SceneConfig(), rng=np.random.default_rng(i)).pixels for i in range(10)
     }
     assert len(pairs) > 5
 
@@ -209,9 +204,7 @@ def test_selected_pixels_and_ranked_boundary_inside_raw_foreground(policy):
     for selected in candidates:
         for u, v in selected.pixels:
             u, v = int(u), int(v)
-            assert not (
-                safe[v - 1, u] and safe[v + 1, u] and safe[v, u - 1] and safe[v, u + 1]
-            )
+            assert not (safe[v - 1, u] and safe[v + 1, u] and safe[v, u - 1] and safe[v, u + 1])
 
 
 def margin_observation():
@@ -237,10 +230,7 @@ def test_mesh_snap_uncertainty_reserved_for_both_endpoints(policy):
     )
     uncertainty = 1.5 * config.mesh_spacing_m
     actions = (
-        [
-            select_action(obs, config, policy=policy, rng=np.random.default_rng(i))
-            for i in range(10)
-        ]
+        [select_action(obs, config, policy=policy, rng=np.random.default_rng(i)) for i in range(10)]
         if policy == "uniform_valid"
         else feasible_candidates(obs, config, max_pairs=32)
     )
@@ -250,10 +240,7 @@ def test_mesh_snap_uncertainty_reserved_for_both_endpoints(policy):
         distance = np.linalg.norm(points[1] - points[0])
         assert distance >= config.min_grasp_separation_m + 2 * uncertainty - 1e-12
         assert distance <= config.max_grasp_separation_m - 2 * uncertainty + 1e-12
-        assert (
-            np.abs(points[:, :2]).max()
-            <= config.grasp_workspace_m / 2 - uncertainty + 1e-12
-        )
+        assert np.abs(points[:, :2]).max() <= config.grasp_workspace_m / 2 - uncertainty + 1e-12
         # Worst-case opposite snaps along the pair direction still respect separation.
         direction = (points[1] - points[0]) / distance
         for sign in [-1, 1]:
@@ -266,9 +253,7 @@ def test_mesh_snap_uncertainty_reserved_for_both_endpoints(policy):
         assert all(
             abs(value) <= 0.205
             for selected in actions
-            for value in pixels_to_world(obs, np.asarray(selected.pixels))[
-                :, :2
-            ].ravel()
+            for value in pixels_to_world(obs, np.asarray(selected.pixels))[:, :2].ravel()
         )
 
 

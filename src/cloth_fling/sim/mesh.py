@@ -15,18 +15,22 @@ def square_mesh(size: float = 0.5, spacing: float = 0.01) -> tuple[np.ndarray, n
     n = int(np.ceil(size / spacing))
     if n > 1000:
         raise ValueError("mesh exceeds bounded resolution")
-    x, y = np.meshgrid(np.linspace(-size / 2, size / 2, n + 1),
-                       np.linspace(-size / 2, size / 2, n + 1))
+    x, y = np.meshgrid(
+        np.linspace(-size / 2, size / 2, n + 1), np.linspace(-size / 2, size / 2, n + 1)
+    )
     positions = np.column_stack((x.ravel(), y.ravel(), np.zeros(x.size)))
     a = (np.arange(n)[:, None] * (n + 1) + np.arange(n)).ravel()
-    faces = np.concatenate((np.column_stack((a, a + 1, a + n + 2)),
-                            np.column_stack((a, a + n + 2, a + n + 1))))
+    faces = np.concatenate(
+        (np.column_stack((a, a + 1, a + n + 2)), np.column_stack((a, a + n + 2, a + n + 1)))
+    )
     return positions, faces.astype(np.int32)
 
 
 def mesh_edges(faces: np.ndarray) -> np.ndarray:
-    return np.unique(np.sort(np.concatenate((faces[:, [0, 1]], faces[:, [1, 2]],
-                                            faces[:, [2, 0]])), axis=1), axis=0)
+    return np.unique(
+        np.sort(np.concatenate((faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]])), axis=1),
+        axis=0,
+    )
 
 
 def mesh_identity(positions: np.ndarray, faces: np.ndarray) -> str:
@@ -59,8 +63,9 @@ def pixel_ray(pixel: tuple[float, float], calibration: dict) -> tuple[np.ndarray
     return pose[:3, 3].copy(), direction / np.linalg.norm(direction)
 
 
-def ray_surface_hit(origin: np.ndarray, direction: np.ndarray, positions: np.ndarray,
-                    faces: np.ndarray) -> tuple[np.ndarray, int]:
+def ray_surface_hit(
+    origin: np.ndarray, direction: np.ndarray, positions: np.ndarray, faces: np.ndarray
+) -> tuple[np.ndarray, int]:
     """Double-sided nearest ray/triangle hit; triangle ID breaks coincident ties."""
     triangles = positions[faces]
     e1, e2 = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
@@ -72,8 +77,7 @@ def ray_surface_hit(origin: np.ndarray, direction: np.ndarray, positions: np.nda
     q = np.cross(s, e1)
     v = inv * (q @ direction)
     t = inv * np.einsum("ij,ij->i", e2, q)
-    valid = ((np.abs(det) > 1e-12) & (u >= -1e-8) & (v >= -1e-8)
-             & (u + v <= 1 + 1e-8) & (t > 1e-8))
+    valid = (np.abs(det) > 1e-12) & (u >= -1e-8) & (v >= -1e-8) & (u + v <= 1 + 1e-8) & (t > 1e-8)
     if not valid.any():
         raise ValueError("pixel does not hit cloth")
     ids = np.flatnonzero(valid)
@@ -81,8 +85,13 @@ def ray_surface_hit(origin: np.ndarray, direction: np.ndarray, positions: np.nda
     return origin + t[face_id] * direction, face_id
 
 
-def visible_particle(pixel: tuple[float, float], positions: np.ndarray, faces: np.ndarray,
-                     calibration: dict, radius: float) -> int:
+def visible_particle(
+    pixel: tuple[float, float],
+    positions: np.ndarray,
+    faces: np.ndarray,
+    calibration: dict,
+    radius: float,
+) -> int:
     """Nearest visible vertex of the FIRST hit triangle, within a metric radius.
 
     Restricting eligibility to that face prevents a closer hidden-layer vertex from
@@ -107,9 +116,17 @@ def visible_particle(pixel: tuple[float, float], positions: np.ndarray, faces: n
     raise ValueError("no visible eligible particle within pick radius")
 
 
-def resolve_grasps(pixels: tuple, positions: np.ndarray, faces: np.ndarray,
-                   calibration: dict, *, radius: float, workspace: float,
-                   min_separation: float, max_separation: float) -> tuple[int, int]:
+def resolve_grasps(
+    pixels: tuple,
+    positions: np.ndarray,
+    faces: np.ndarray,
+    calibration: dict,
+    *,
+    radius: float,
+    workspace: float,
+    min_separation: float,
+    max_separation: float,
+) -> tuple[int, int]:
     if np.asarray(pixels).shape != (2, 2):
         raise ValueError("exactly two image pixels required")
     ids = tuple(visible_particle(p, positions, faces, calibration, radius) for p in pixels)

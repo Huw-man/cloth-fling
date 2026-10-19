@@ -35,9 +35,7 @@ class SelectionConfig:
 def _options(config: SceneConfig | SelectionConfig) -> SelectionConfig:
     values = {k: getattr(config, k, v) for k, v in vars(SelectionConfig()).items()}
     c = SelectionConfig(**values)
-    if not (
-        0 < c.min_grasp_separation_m <= c.max_grasp_separation_m <= c.grasp_workspace_m
-    ):
+    if not (0 < c.min_grasp_separation_m <= c.max_grasp_separation_m <= c.grasp_workspace_m):
         raise ValueError("invalid separation/workspace limits")
     if (
         not np.isfinite(list(values.values())).all()
@@ -61,9 +59,7 @@ def foreground_mask(
     rgb = np.asarray(observation.rgb)
     if rgb.ndim != 3 or rgb.shape[2] != 3 or not np.isfinite(rgb).all():
         raise ValueError("expected finite H x W x 3 RGB")
-    scale = (
-        255 if np.issubdtype(rgb.dtype, np.floating) and rgb.max(initial=0) <= 1 else 1
-    )
+    scale = 255 if np.issubdtype(rgb.dtype, np.floating) and rgb.max(initial=0) <= 1 else 1
     high, low = np.max(rgb, axis=2) * scale, np.min(rgb, axis=2) * scale
     return (high > threshold) & (high - low > chroma)
 
@@ -127,18 +123,14 @@ def pixels_to_world(observation: Observation, pixels: np.ndarray) -> np.ndarray:
             raise ValueError("invalid pinhole calibration shapes")
         rays = np.linalg.solve(
             k,
-            np.column_stack(
-                (uv + float(c.get("pixel_center_offset", 0.5)), np.ones(len(uv)))
-            ).T,
+            np.column_stack((uv + float(c.get("pixel_center_offset", 0.5)), np.ones(len(uv)))).T,
         ).T
         if not np.isfinite(rays).all() or np.any(rays[:, 2] <= 0):
             raise ValueError("invalid optical rays")
         camera = rays * (depth / rays[:, 2])[:, None]
         xyz = (np.column_stack((camera, np.ones(len(uv)))) @ transform.T)[:, :3]
     else:
-        raise ValueError(
-            "unsupported calibration: world_bounds_m or intrinsics required"
-        )
+        raise ValueError("unsupported calibration: world_bounds_m or intrinsics required")
     if not np.isfinite(xyz).all():
         raise ValueError("nonfinite unprojected geometry")
     return xyz
@@ -146,20 +138,14 @@ def pixels_to_world(observation: Observation, pixels: np.ndarray) -> np.ndarray:
 
 def _candidates(observation, config, boundary_only=False):
     c = _options(config)
-    mask = conservative_foreground_mask(
-        observation, c.foreground_threshold, c.foreground_chroma
-    )
+    mask = conservative_foreground_mask(observation, c.foreground_threshold, c.foreground_chroma)
     if boundary_only:
         padded = np.pad(mask, 1)
-        interior = (
-            padded[:-2, 1:-1] & padded[2:, 1:-1] & padded[1:-1, :-2] & padded[1:-1, 2:]
-        )
+        interior = padded[:-2, 1:-1] & padded[2:, 1:-1] & padded[1:-1, :-2] & padded[1:-1, 2:]
         mask &= ~interior
     vu = np.argwhere(mask)
     if observation.depth is None:
-        raise NoValidPairError(
-            "privileged depth required; no RGB-only feasibility fallback"
-        )
+        raise NoValidPairError("privileged depth required; no RGB-only feasibility fallback")
     depth = np.asarray(observation.depth)
     if depth.shape != mask.shape:
         raise ValueError("depth shape differs from RGB")
@@ -227,9 +213,7 @@ def select_action(
     if primitive not in {"laydown", "fling"}:
         raise ValueError(f"unknown primitive: {primitive}")
     if policy in {"geometry_guided", "geometry_guided_privileged_depth"}:
-        pairs = feasible_candidates(
-            observation, config, primitive=primitive, max_pairs=1
-        )
+        pairs = feasible_candidates(observation, config, primitive=primitive, max_pairs=1)
         if not pairs:
             raise NoValidPairError("no feasible visible boundary pair")
         return pairs[0]

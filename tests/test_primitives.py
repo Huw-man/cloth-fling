@@ -32,9 +32,7 @@ def short_config():
 
 
 def action(env, primitive="laydown"):
-    return select_action(
-        env.observe(), env.config, policy="geometry_guided", primitive=primitive
-    )
+    return select_action(env.observe(), env.config, policy="geometry_guided", primitive=primitive)
 
 
 @pytest.mark.parametrize(
@@ -77,10 +75,7 @@ def test_lifecycle_retained_and_measured(short_config, primitive, phases):
     assert env.attached_ids == () and result.diagnostics["settled"]
     assert result.after.observation_id != result.before.observation_id
     assert result.coverage_after == env.coverage()[0]
-    assert (
-        result.diagnostics["coverage_gain"]
-        == result.coverage_after - result.coverage_before
-    )
+    assert result.diagnostics["coverage_gain"] == result.coverage_after - result.coverage_before
     assert all(len(ids) == 2 for _, _, ids in env.commands)
     assert env.release_records[0][2][list(env.release_records[0][1]), 2].max() <= 0.02
     assert result.diagnostics["strain_bound_available"]
@@ -92,10 +87,7 @@ def test_lifecycle_retained_and_measured(short_config, primitive, phases):
     velocity = np.diff(commands, axis=0) / env.config.sim_dt
     acceleration = np.diff(velocity, axis=0) / env.config.sim_dt
     assert np.linalg.norm(velocity, axis=2).max() <= short_config.max_speed_m_s + 1e-6
-    assert (
-        np.linalg.norm(acceleration, axis=2).max()
-        <= short_config.max_acceleration_m_s2 + 1e-6
-    )
+    assert np.linalg.norm(acceleration, axis=2).max() <= short_config.max_acceleration_m_s2 + 1e-6
     # No hidden stops at swing/pullback/lower or laydown/drag internal knots.
     for phase in ["pullback", "lower", "place"] if primitive == "fling" else ["drag"]:
         trace = next(t for t in traces if t["phase"] == phase)
@@ -122,9 +114,7 @@ def test_negative_gain_and_determinism(short_config):
 )
 def test_deadline_releases(short_config, limit, reason):
     env = FakeClothBackend()
-    c = replace(
-        short_config, **{limit: 0.025 if limit == "max_simulated_seconds" else 1e-9}
-    )
+    c = replace(short_config, **{limit: 0.025 if limit == "max_simulated_seconds" else 1e-9})
     result = execute_action(env, action(env), c)
     assert not result.execution_valid and result.truncated
     assert reason in result.reason
@@ -179,11 +169,7 @@ def test_invalid_action_does_not_step_or_reset(short_config):
     env = FakeClothBackend()
     result = execute_action(env, GraspAction(((0, 0), (63, 63))), short_config)
     assert not result.execution_valid and env.step_calls == 0
-    assert (
-        "foreground" in result.reason
-        and env.reset_calls == 0
-        and env.release_calls == 1
-    )
+    assert "foreground" in result.reason and env.reset_calls == 0 and env.release_calls == 1
 
 
 def test_release_retains_momentum():
@@ -230,9 +216,7 @@ def test_settle_timeout_is_invalid(short_config):
             env.velocities[:, 0] = 0.02
 
     env.step = never_quiet
-    result = execute_action(
-        env, action(env), replace(short_config, settle_timeout_seconds=0.1)
-    )
+    result = execute_action(env, action(env), replace(short_config, settle_timeout_seconds=0.1))
     assert not result.execution_valid and result.reason == "settle_timeout"
     assert not result.diagnostics["settled"]
 
@@ -244,13 +228,9 @@ def test_diagnostic_fixed_pair_restores_fixture(short_config, tmp_path):
         env.velocities.copy(),
         env.simulated_time,
     )
-    report = run_diagnostic(
-        env, seed=4, output_dir=tmp_path, primitive_config=short_config
-    )
+    report = run_diagnostic(env, seed=4, output_dir=tmp_path, primitive_config=short_config)
     assert report["execution_valid"], report
-    assert report["final_restore_valid"] and all(
-        x["valid"] for x in report["restore_checks"]
-    )
+    assert report["final_restore_valid"] and all(x["valid"] for x in report["restore_checks"])
     assert len(report["runs"]) == 2
     assert report["runs"][0]["pixels"] == report["runs"][1]["pixels"]
     assert report["runs"][0]["coverage_before"] == report["runs"][1]["coverage_before"]
@@ -300,8 +280,7 @@ def test_compressed_fixture_closed_loop_tauten(short_config):
     assert result.execution_valid, (result.reason, result.diagnostics)
     trace = [t for t in result.evidence["phase_traces"] if t["phase"] == "tauten"]
     spans = [
-        np.linalg.norm(np.diff(np.asarray(t["commanded_grasp_positions_m"]), axis=0))
-        for t in trace
+        np.linalg.norm(np.diff(np.asarray(t["commanded_grasp_positions_m"]), axis=0)) for t in trace
     ]
     assert spans[-1] > spans[0] + 0.005
     cap = result.diagnostics["rest_geodesic_distance_m"] * (1 + short_config.max_strain)
@@ -319,20 +298,13 @@ def test_rest_geometry_missing_is_labeled_fallback(short_config):
             return getattr(env, name)
 
         def snapshot(self):
-            return {
-                k: v
-                for k, v in env.snapshot().items()
-                if k not in {"rest_positions", "edges"}
-            }
+            return {k: v for k, v in env.snapshot().items() if k not in {"rest_positions", "edges"}}
 
     result = execute_action(RequiredOnly(), action(env), short_config)
     assert result.execution_valid, result.reason
     assert not result.diagnostics["strain_bound_available"]
     assert result.diagnostics["rest_geodesic_distance_m"] is None
-    assert (
-        "no material strain guarantee"
-        in result.diagnostics["proxy_labels"]["missing_rest"]
-    )
+    assert "no material strain guarantee" in result.diagnostics["proxy_labels"]["missing_rest"]
 
 
 def test_strain_limit_fails_explicitly_and_releases(short_config):
@@ -356,9 +328,7 @@ def test_release_velocity_mutation_is_invalid(short_config):
     def zero_momentum():
         release()
         env.velocities[:] = 0
-        env.velocities[0, 0] = (
-            0.1  # detectable violation even with a quiet final command
-        )
+        env.velocities[0, 0] = 0.1  # detectable violation even with a quiet final command
 
     env.release = zero_momentum
     result = execute_action(env, action(env), short_config)
@@ -401,9 +371,7 @@ def test_manual_diagnostic_pair_artifacts(short_config, tmp_path):
             ]
             == 0.5
         )
-    with np.load(
-        tmp_path / report["fixture_artifacts"]["arrays"], allow_pickle=False
-    ) as state:
+    with np.load(tmp_path / report["fixture_artifacts"]["arrays"], allow_pickle=False) as state:
         assert len(state.files) > 0
 
 

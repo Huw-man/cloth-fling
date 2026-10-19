@@ -12,9 +12,13 @@ from cloth_fling.sim.backend import GenesisBackend, InvalidResetError, _state_ha
 from cloth_fling.sim.coverage import CoverageGrid
 from cloth_fling.sim.mesh import pixel_ray, ray_surface_hit
 
-pytestmark = [pytest.mark.gpu,
-              pytest.mark.skipif(os.environ.get("CLOTH_FLING_RUN_GPU") != "1",
-                                 reason="set CLOTH_FLING_RUN_GPU=1 for exclusive host GPU run")]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        os.environ.get("CLOTH_FLING_RUN_GPU") != "1",
+        reason="set CLOTH_FLING_RUN_GPU=1 for exclusive host GPU run",
+    ),
+]
 
 
 def pixels_for(points, calibration):
@@ -31,8 +35,7 @@ def foreground(rgb):
 def erode_one_pixel(mask):
     padded = np.pad(mask, 1, constant_values=False)
     h, w = mask.shape
-    return np.logical_and.reduce([padded[y:y + h, x:x + w]
-                                  for y in range(3) for x in range(3)])
+    return np.logical_and.reduce([padded[y : y + h, x : x + w] for y in range(3) for x in range(3)])
 
 
 def nonflat_render_metrics(backend, observation):
@@ -55,8 +58,8 @@ def nonflat_render_metrics(backend, observation):
     precision = float(np.mean(oracle[interior_prediction]))
     recall = float(np.mean(predicted[interior_oracle]))
     raw_iou = float(np.sum(predicted & oracle) / np.sum(predicted | oracle))
-    assert precision > .995 and recall > .995
-    assert raw_iou > .94
+    assert precision > 0.995 and recall > 0.995
+    assert raw_iou > 0.94
     candidates = np.argwhere(interior_prediction & interior_oracle)
     errors = []
     for v, u in candidates[np.linspace(0, len(candidates) - 1, 128, dtype=int)]:
@@ -68,9 +71,14 @@ def nonflat_render_metrics(backend, observation):
     # Genesis skins the 1 cm visual mesh from neighboring remeshed particles;
     # allow half a mesh spacing, not centimetres of stale planar depth.
     assert quantiles[-1] < backend.config.mesh_spacing_m / 2
-    return {"eroded_precision": precision, "eroded_recall": recall, "raw_iou": raw_iou,
-            "predicted_pixels": int(predicted.sum()), "oracle_pixels": int(oracle.sum()),
-            "depth_error_m_median_p95_max": quantiles.tolist()}
+    return {
+        "eroded_precision": precision,
+        "eroded_recall": recall,
+        "raw_iou": raw_iou,
+        "predicted_pixels": int(predicted.sum()),
+        "oracle_pixels": int(oracle.sum()),
+        "depth_error_m_median_p95_max": quantiles.tolist(),
+    }
 
 
 def test_nonflat_first_frame_and_immediate_restore(tmp_path):
@@ -105,15 +113,17 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
         backend.scene.step = forbidden_step
         # A shifted, raised NONPLANAR fixture at the same step exercises explicit
         # setters through restore, with substantial silhouette and depth changes.
-        shifted = {key: value.copy() if isinstance(value, np.ndarray) else value
-                   for key, value in fold_state.items()}
-        shifted["positions"] += np.array([-.12, -.08, .12], dtype=np.float32)
+        shifted = {
+            key: value.copy() if isinstance(value, np.ndarray) else value
+            for key, value in fold_state.items()
+        }
+        shifted["positions"] += np.array([-0.12, -0.08, 0.12], dtype=np.float32)
         shifted["state_hash"] = _state_hash(shifted)
         raised = backend.restore(shifted)
         report["same_step_raised_restore"] = nonflat_render_metrics(backend, raised)
         assert backend.scene._t == step
         assert backend.snapshot()["state_hash"] == shifted["state_hash"]
-        assert np.mean(foreground(raised.rgb) != foreground(folded.rgb)) > .02
+        assert np.mean(foreground(raised.rgb) != foreground(folded.rgb)) > 0.02
         restored = backend.restore(fold_state)
         np.testing.assert_array_equal(restored.rgb, folded.rgb)
         np.testing.assert_array_equal(restored.depth, folded.depth)
@@ -122,7 +132,7 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
         assert backend.scene._t == step
         backend.scene.step = original_step
         flat = backend.reset(7, kind="flat")
-        assert np.mean(foreground(flat.rgb) != foreground(folded.rgb)) > .05
+        assert np.mean(foreground(flat.rgb) != foreground(folded.rgb)) > 0.05
         # Restore folded state after a flat render, at an unchanged scene step.
         backend.scene.step = forbidden_step
         step = backend.scene._t
@@ -134,8 +144,12 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
         np.testing.assert_array_equal(from_flat.depth, folded.depth)
         assert from_flat.observation_id == folded.observation_id
         assert backend.attached_ids == () and backend._free().all()
-        np.savez_compressed(tmp_path / "nonflat-render-evidence.npz", rgb=folded.rgb,
-                            depth=folded.depth, **fold_state)
+        np.savez_compressed(
+            tmp_path / "nonflat-render-evidence.npz",
+            rgb=folded.rgb,
+            depth=folded.depth,
+            **fold_state,
+        )
         report["wall_seconds"] = time.monotonic() - stamp
         print("STAGE0_NONFLAT_RENDER_REPORT=" + json.dumps(report, sort_keys=True))
 
@@ -153,21 +167,23 @@ def test_host_pipeline(tmp_path):
         assert before.rgb.dtype == np.uint8 and before.rgb.std() > 10
         assert before.depth.dtype == np.float32 and np.isfinite(before.depth).all()
         assert backend.observe().observation_id == before.observation_id
-        assert backend.coverage() == pytest.approx((1, .25, .25), abs=.002)
+        assert backend.coverage() == pytest.approx((1, 0.25, 0.25), abs=0.002)
         chroma = np.ptp(before.rgb.astype(np.int16), axis=2)
         cloth_pixels = before.depth < 1.797
         table_pixels = (before.depth > 1.799) & (before.depth < 1.801)
         report["rgb_segmentation"] = {
             "cloth_chroma_min_median_max": np.percentile(
-                chroma[cloth_pixels], [0, 50, 100]).tolist(),
+                chroma[cloth_pixels], [0, 50, 100]
+            ).tolist(),
             "table_chroma_min_median_max": np.percentile(
-                chroma[table_pixels], [0, 50, 100]).tolist(),
+                chroma[table_pixels], [0, 50, 100]
+            ).tolist(),
             "table_rgb_max": int(before.rgb[table_pixels].max()),
             "chroma_gt30_precision": float(np.mean(cloth_pixels[chroma > 30])),
             "chroma_gt30_recall": float(np.mean(chroma[cloth_pixels] > 30)),
         }
-        assert report["rgb_segmentation"]["chroma_gt30_precision"] > .99
-        assert report["rgb_segmentation"]["chroma_gt30_recall"] > .99
+        assert report["rgb_segmentation"]["chroma_gt30_precision"] > 0.99
+        assert report["rgb_segmentation"]["chroma_gt30_recall"] > 0.99
         foreground = (before.rgb.max(axis=2) > 45) & (chroma > 20)
         ray_matches = []
         flat_positions = backend.get_positions()
@@ -182,12 +198,13 @@ def test_host_pipeline(tmp_path):
                     hit = False
                 ray_matches.append(hit == expected)
         report["rgb_segmentation"]["ray_agreement_256_balanced_samples"] = float(
-            np.mean(ray_matches))
-        assert np.mean(ray_matches) > .99
+            np.mean(ray_matches)
+        )
+        assert np.mean(ray_matches) > 0.99
         json.dumps(before.calibration, allow_nan=False)
         p = backend.get_positions()
         # Two separated interior material points, projected using actual calibration.
-        requested = np.array([[-.15, 0, 0], [.15, 0, 0]])
+        requested = np.array([[-0.15, 0, 0], [0.15, 0, 0]])
         candidates = [int(np.argmin(np.linalg.norm(p - point, axis=1))) for point in requested]
         pixels = pixels_for(p[candidates], before.calibration)
         ids = backend.attach(pixels)
@@ -214,13 +231,14 @@ def test_host_pipeline(tmp_path):
             target = initial + [0.0001 * i, 0, 0.001 * i]
             backend.set_attachment_targets(target)
             backend.step()
-            endpoint_errors.append(float(np.max(np.abs(
-                backend.get_positions()[list(ids)] - target))))
+            endpoint_errors.append(
+                float(np.max(np.abs(backend.get_positions()[list(ids)] - target)))
+            )
         assert calls and set(calls) == {ids}
         assert max(endpoint_errors) < 2e-5
         report["max_endpoint_error_m"] = max(endpoint_errors)
         velocity = backend.get_velocities()[list(ids)]
-        np.testing.assert_allclose(velocity, np.tile([.05, 0, .5], (2, 1)), atol=2e-4)
+        np.testing.assert_allclose(velocity, np.tile([0.05, 0, 0.5], (2, 1)), atol=2e-4)
         attached_snapshot = backend.snapshot()
         with pytest.raises(ValueError, match="attached"):
             backend.restore(attached_snapshot)
@@ -232,7 +250,7 @@ def test_host_pipeline(tmp_path):
         backend.cloth.set_particles_pos = original_position
         backend.step()
         assert np.isfinite(backend.get_positions()).all()
-        assert np.linalg.norm(backend.get_velocities()[list(ids)]) > .1
+        assert np.linalg.norm(backend.get_velocities()[list(ids)]) > 0.1
         state = backend.snapshot()
         observation = backend.observe()
         path = tmp_path / "snapshot.npz"
@@ -250,7 +268,8 @@ def test_host_pipeline(tmp_path):
         delta = float(np.max(np.abs(backend.get_positions() - flat_state["positions"])))
         report["repeated_flat_max_position_delta_m"] = delta
         report["repeated_flat_bitwise_observation_identity"] = (
-            repeat.observation_id == before.observation_id)
+            repeat.observation_id == before.observation_id
+        )
         assert delta < 1e-5
         for kind in ("drop", "fold"):
             stamp = time.monotonic()
@@ -262,13 +281,16 @@ def test_host_pipeline(tmp_path):
                 if kind != "drop":
                     raise
                 backend.observe()  # Invalid terminal state remains observable.
-            report[kind] = {"wall_seconds": time.monotonic() - stamp,
-                            "coverage": backend.coverage(), **backend.reset_metadata}
+            report[kind] = {
+                "wall_seconds": time.monotonic() - stamp,
+                "coverage": backend.coverage(),
+                **backend.reset_metadata,
+            }
             assert backend.attached_ids == () and backend._free().all()
             assert np.isfinite(backend.get_positions()).all()
             if backend.reset_metadata["status"] == "valid":
-                assert backend.reset_metadata["stable_seconds"] >= .5
-                assert backend.reset_metadata["final_rms_speed_m_s"] < .01
+                assert backend.reset_metadata["stable_seconds"] >= 0.5
+                assert backend.reset_metadata["final_rms_speed_m_s"] < 0.01
             else:
                 assert backend.reset_metadata["status"] == "invalid"
                 assert backend.reset_metadata["reason"]

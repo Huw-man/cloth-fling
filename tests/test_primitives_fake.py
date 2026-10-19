@@ -28,16 +28,13 @@ class FakeClothBackend:
         )
         self.edges = np.unique(
             np.sort(
-                np.vstack(
-                    (self.faces[:, :2], self.faces[:, 1:], self.faces[:, [0, 2]])
-                ),
+                np.vstack((self.faces[:, :2], self.faces[:, 1:], self.faces[:, [0, 2]])),
                 axis=1,
             ),
             axis=0,
         )
         self.lengths = np.linalg.norm(
-            self.rest_positions[self.edges[:, 1]]
-            - self.rest_positions[self.edges[:, 0]],
+            self.rest_positions[self.edges[:, 1]] - self.rest_positions[self.edges[:, 0]],
             axis=1,
         )
         self.positions = self.rest_positions.copy()
@@ -91,9 +88,7 @@ class FakeClothBackend:
             matrix = np.vstack((vertices.T, np.ones(3)))
             if abs(np.linalg.det(matrix)) < 1e-12:
                 continue
-            weights = np.linalg.solve(
-                matrix, np.column_stack((pixels, np.ones(len(pixels)))).T
-            )
+            weights = np.linalg.solve(matrix, np.column_stack((pixels, np.ones(len(pixels)))).T)
             keep = (weights >= -1e-9).all(axis=0)
             pixels, weights = pixels[keep], weights[:, keep]
             z = weights.T @ (1 - q[face, 2])
@@ -111,9 +106,7 @@ class FakeClothBackend:
     def attach(self, pixels):
         self.attach_calls += 1
         points = pixels_to_world(self.observe(), np.asarray(pixels))
-        ids = tuple(
-            int(np.argmin(np.linalg.norm(self.positions - p, axis=1))) for p in points
-        )
+        ids = tuple(int(np.argmin(np.linalg.norm(self.positions - p, axis=1))) for p in points)
         self.attached_ids = ids
         self.targets = self.positions[list(ids)].copy()
         return ids
@@ -121,9 +114,7 @@ class FakeClothBackend:
     def set_attachment_targets(self, targets):
         assert len(self.attached_ids) == 2
         self.targets = np.asarray(targets).copy()
-        self.commands.append(
-            (self.simulated_time, self.targets.copy(), self.attached_ids)
-        )
+        self.commands.append((self.simulated_time, self.targets.copy(), self.attached_ids))
 
     def step(self, count=1):
         for _ in range(count):
@@ -140,10 +131,7 @@ class FakeClothBackend:
                 lengths = np.linalg.norm(delta, axis=1)
                 inv = inverse_mass[a] + inverse_mass[b]
                 correction = (
-                    delta
-                    * ((lengths - self.lengths) / np.maximum(lengths * inv, 1e-12))[
-                        :, None
-                    ]
+                    delta * ((lengths - self.lengths) / np.maximum(lengths * inv, 1e-12))[:, None]
                 ) * 0.5
                 updates = np.zeros_like(self.positions)
                 np.add.at(updates, a, correction * inverse_mass[a, None])
@@ -154,9 +142,7 @@ class FakeClothBackend:
                     self.positions[list(self.attached_ids)] = self.targets
             self.velocities = (self.positions - previous) / dt
             contact = self.positions[:, 2] <= 0.004 + 1e-9
-            self.velocities[contact, :2] *= (
-                0.5  # fake table friction, not primitive damping
-            )
+            self.velocities[contact, :2] *= 0.5  # fake table friction, not primitive damping
             self.velocities[contact, 2] = np.maximum(self.velocities[contact, 2], 0)
             self.simulated_time += dt
 
@@ -191,12 +177,7 @@ class FakeClothBackend:
             upper.append(point)
         hull = np.array(lower[:-1] + upper[:-1])
         area = (
-            abs(
-                np.sum(
-                    hull[:, 0] * np.roll(hull[:, 1], -1)
-                    - hull[:, 1] * np.roll(hull[:, 0], -1)
-                )
-            )
+            abs(np.sum(hull[:, 0] * np.roll(hull[:, 1], -1) - hull[:, 1] * np.roll(hull[:, 0], -1)))
             / 2
         )
         return float(area / 0.04), float(area), 0.04
