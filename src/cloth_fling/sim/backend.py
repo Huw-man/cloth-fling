@@ -17,6 +17,7 @@ import numpy as np
 from cloth_fling.contracts import Observation, SceneConfig
 from cloth_fling.sim.coverage import CoverageGrid
 from cloth_fling.sim.mesh import mesh_edges, mesh_identity, resolve_grasps, square_mesh, write_obj
+from cloth_fling.sim.render_mesh import PhysicsMeshRendering
 
 
 class InvalidResetError(RuntimeError):
@@ -114,7 +115,10 @@ class GenesisBackend:
                 res=(config.image_size, config.image_size), pos=(0, 0, 1.8),
                 lookat=(0, 0, 0), up=(0, 1, 0), fov=45, GUI=False,
             )
+            self._physics_mesh_rendering = PhysicsMeshRendering(self.scene, self.cloth, gs)
             self.scene.build()
+            self._physics_mesh_rendering.install_identity_supports()
+            self._physics_mesh_rendering.install_two_sided_depth(self.camera)
             # Genesis's loader may reorder OBJ vertices. Adopt its topology, then
             # verify the remeshed surface is still the requested rest square.
             self.rest_positions = self.get_positions()
@@ -194,7 +198,7 @@ class GenesisBackend:
     def observe(self) -> Observation:
         self._ensure_open()
         if self._observation is None:
-            render_options = {"rgb": True, "depth": True,
+            render_options = {"rgb": True, "depth": False,
                               "antialiasing": False, "force_render": True}
             if not self._render_buffers_ready:
                 # Genesis 0.4.3 applies pending vertex updates BEFORE the first
@@ -205,7 +209,11 @@ class GenesisBackend:
                 self._render_buffers_ready = True
             # Restore/setters do not increment scene._t. Bypass both visualizer
             # and rasterizer time caches; refreshing rendering must never step.
-            rgb, depth, _, _ = self.camera.render(**render_options)
+            rgb, _, _, _ = self.camera.render(**render_options)
+            # Separate native depth-only draw samples pixel centres without RGB
+            # MSAA. The pinned adapter supplies two-sided depth for folded cloth.
+            _, depth, _, _ = self.camera.render(
+                rgb=False, depth=True, antialiasing=False, force_render=True)
             rgb = np.asarray(rgb, dtype=np.uint8).copy()
             depth = np.asarray(depth, dtype=np.float32).copy()
             if (rgb.shape != (self.config.image_size, self.config.image_size, 3)

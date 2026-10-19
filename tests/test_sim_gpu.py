@@ -65,9 +65,14 @@ def nonflat_render_metrics(backend, observation):
         expected_depth = (inverse_pose @ [*hit, 1])[2]
         errors.append(abs(float(observation.depth[v, u]) - expected_depth))
     quantiles = np.percentile(errors, [50, 95, 100])
-    # Genesis skins the 1 cm visual mesh from neighboring remeshed particles;
-    # allow half a mesh spacing, not centimetres of stale planar depth.
+    # Preserve the original maximum gate and require <1 mm with exact topology
+    # and the calibrated double-sided depth-only pass.
     assert quantiles[-1] < backend.config.mesh_spacing_m / 2
+    assert quantiles[-1] < .001
+    np.testing.assert_array_equal(
+        backend.scene.pbd_solver.vverts_render.pos.to_numpy()[:, 0], positions)
+    np.testing.assert_array_equal(
+        backend.scene.pbd_solver.vfaces_indices.to_numpy(), backend.faces)
     return {"eroded_precision": precision, "eroded_recall": recall, "raw_iou": raw_iou,
             "predicted_pixels": int(predicted.sum()), "oracle_pixels": int(oracle.sum()),
             "depth_error_m_median_p95_max": quantiles.tolist()}
@@ -78,6 +83,12 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
     report = {}
     stamp = time.monotonic()
     with GenesisBackend(SceneConfig()) as backend:
+        report["physics_vertices"] = backend.cloth.n_particles
+        report["visual_vertices"] = backend.cloth.n_vverts
+        report["physics_faces"] = len(backend.faces)
+        report["visual_faces"] = backend.cloth.n_vfaces
+        assert backend.cloth.n_vverts == backend.cloth.n_particles
+        assert backend.cloth.n_vfaces == len(backend.faces)
         original_render = backend.camera.render
         render_calls = []
 
@@ -93,7 +104,7 @@ def test_nonflat_first_frame_and_immediate_restore(tmp_path):
         backend.camera.render = immutable_render
         folded = backend.reset(11, kind="fold")
         fold_state = backend.snapshot()
-        assert len(render_calls) == 2  # Warm buffers, then upload actual folded vertices.
+        assert len(render_calls) == 3  # Warm, actual RGB, calibrated depth-only draw.
         report["fold_first_frame"] = nonflat_render_metrics(backend, folded)
         # Direct observation/restore cannot hide a refresh behind physics steps.
         step = backend.scene._t
