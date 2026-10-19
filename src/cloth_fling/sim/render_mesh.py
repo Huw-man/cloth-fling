@@ -1,4 +1,4 @@
-"""Exact PBD physics-triangle rendering adapter for Genesis 0.4.3 only.
+"""Exact PBD physics-triangle rendering adapter for Genesis 1.4.4 only.
 
 The pinned private API is deliberately isolated here. Before scene.build(),
 replace only the visual topology with a detached copy of the remeshed cloth.
@@ -8,13 +8,15 @@ No Genesis/torch imports or initialization occur when importing this module.
 
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 
 
 def _install_two_sided_depth_program(renderer, flags):
     """Keep native depth-only sampling while supplying native two-sided triangles.
 
-    0.4.3 depth-only rendering forces backface culling and omits the RGB geometry
+    1.4.4 depth-only rendering forces backface culling and omits the RGB geometry
     shader. Its segmentation shader uses the identical position transform plus
     the two-sided geometry shader. Reuse that program for double-sided depth;
     its color output is ignored by the depth-only framebuffer readback. This is
@@ -34,8 +36,8 @@ class PhysicsMeshRendering:
     """Single unbatched PBD cloth; fail closed when the pinned layout changes."""
 
     def __init__(self, scene, cloth, genesis):
-        if genesis.__version__ != "0.4.3":
-            raise RuntimeError("physics-mesh rendering requires Genesis 0.4.3")
+        if genesis.__version__ != "1.4.4":
+            raise RuntimeError("physics-mesh rendering requires Genesis 1.4.4")
         if scene.is_built:
             raise RuntimeError("visual topology must be installed before scene.build")
         solver = scene.pbd_solver
@@ -51,6 +53,8 @@ class PhysicsMeshRendering:
             raise RuntimeError(
                 "physics-mesh rendering requires one visual PBD cloth at offset zero"
             )
+        if not cloth.surface.double_sided:
+            raise RuntimeError("exact folded-cloth rendering requires a double-sided surface")
         self.scene, self.cloth, self.solver = scene, cloth, solver
         self._physics_mesh = cloth.mesh
         self._positions = np.asarray(cloth.mesh.verts).copy()
@@ -80,6 +84,10 @@ class PhysicsMeshRendering:
             or np.shares_memory(visual.faces, cloth.mesh.faces)
         ):
             raise RuntimeError("visual mesh must not alias physics topology")
+        if not np.array_equal(visual.verts, self._positions) or not np.array_equal(
+            visual.faces, self._faces
+        ):
+            raise RuntimeError("Genesis visual mesh construction reordered physics topology")
         cloth._vmesh = visual
         cloth._vverts = np.asarray(visual.verts, dtype=genesis.np_float).copy()
         cloth._vfaces = np.asarray(visual.faces, dtype=genesis.np_int).copy()
@@ -126,6 +134,12 @@ class PhysicsMeshRendering:
         indices = np.repeat(np.arange(n, dtype=np.int32)[:, None], solver._n_vvert_supports, axis=1)
         weights = np.zeros(indices.shape, dtype=np.float32)
         weights[:, 0] = 1
+        if (
+            solver.vverts_info.support_idxs.to_numpy().shape != indices.shape
+            or solver.vverts_info.support_weights.to_numpy().shape != weights.shape
+            or solver.vfaces_indices.to_numpy().shape != self._faces.shape
+        ):
+            raise RuntimeError("unexpected Genesis 1.4.4 render support field shapes")
         solver.vverts_info.support_idxs.from_numpy(indices)
         solver.vverts_info.support_weights.from_numpy(weights)
         if (
@@ -154,7 +168,20 @@ class PhysicsMeshRendering:
             or type(target).__name__ != "Renderer"
             or not callable(getattr(target, "_get_primitive_program", None))
         ):
-            raise RuntimeError("unexpected Genesis 0.4.3 camera rasterizer layout")
+            raise RuntimeError("unexpected Genesis 1.4.4 camera rasterizer layout")
+        # 1.4.4 still selects mesh_depth without the two-sided geometry shader.
+        # Check the inspected native dispatch before changing this camera only.
+        source = inspect.getsource(type(target)._get_primitive_program)
+        if not all(
+            token in source
+            for token in (
+                "not flags & RenderFlags.DEPTH_ONLY",
+                "elif flags & RenderFlags.SEG:",
+                'geometry_shader = "segmentation_double_sided.geom"',
+                'vertex_shader = "mesh_depth.vert"',
+            )
+        ):
+            raise RuntimeError("unreviewed Genesis depth shader dispatch")
         before = self._state_arrays()
         _install_two_sided_depth_program(target, RenderFlags)
         if any(not np.array_equal(a, b) for a, b in zip(before, self._state_arrays(), strict=True)):

@@ -188,7 +188,17 @@ def load_replay(source, *, episode_id=None):
     if not actions:
         raise ValueError("no replay actions match the requested source/episode")
     origin.update(
-        actions=len(actions), invalid_attempts=sum(not action.execution_valid for action in actions)
+        actions=len(actions),
+        invalid_attempts=sum(not action.execution_valid for action in actions),
+        source_engines=list(
+            {
+                json.dumps(
+                    source_engine_identity(action.state), sort_keys=True
+                ): source_engine_identity(action.state)
+                for action in actions
+            }.values()
+        ),
+        runtime_qualification_inherited=False,
     )
     return actions, origin
 
@@ -217,19 +227,65 @@ def _forbidden_step(*_, **__):
     raise RuntimeError("reconstructed replay must never step physics")
 
 
-def replay_state(state, trace):
-    """Construct an unattached rendering snapshot; saved attachment IDs remain metadata."""
-    from cloth_fling.sim.backend import _state_hash
+def source_engine_identity(state):
+    """Historical schema 1 is evidence of the old engine, never a new restore state."""
+    schema = int(state.get("schema_version", 1))
+    if schema == 1:
+        return {
+            "name": "genesis",
+            "version": "0.4.3",
+            "runtime_generation": "genesis-0.4.3",
+            "snapshot_schema_version": 1,
+        }
+    if schema == 2 and "runtime_identity_json" in state:
+        identity = json.loads(str(state["runtime_identity_json"]))
+        if (
+            not isinstance(identity, dict)
+            or identity.get("engine") != "genesis"
+            or not identity.get("engine_version")
+        ):
+            raise ValueError("invalid source runtime identity")
+        return {
+            "name": "genesis",
+            "version": identity["engine_version"],
+            "runtime_generation": f"genesis-{identity['engine_version']}",
+            "snapshot_schema_version": 2,
+            "backend_identity": identity,
+        }
+    raise ValueError("snapshot is missing its source engine identity")
 
-    result = dict(state)
-    result["positions"] = np.asarray(trace["cloth_positions_m"]).copy()
-    result["velocities"] = np.asarray(
-        trace.get("cloth_velocities_m_s", np.zeros_like(result["positions"]))
-    ).copy()
-    result["free"] = np.ones(len(result["positions"]), dtype=bool)
-    result["simulated_time"] = float(trace["simulated_seconds"])
-    result["state_hash"] = _state_hash(result)
-    return result
+
+def render_recorded_state(env, state, trace):
+    """Explicit render-only import; never rewrite a legacy snapshot into a new schema.
+
+    The backend hook owns device writes and independent topology verification.
+    Validate here too, before allowing even that hook to touch the scene.
+    """
+    for key in ("faces", "rest_positions"):
+        if key not in state:
+            raise ValueError(f"render-only replay requires recorded {key}")
+        if not np.array_equal(np.asarray(state[key]), getattr(env, key)):
+            raise ValueError(f"render-only replay {key} mismatch; remapping is forbidden")
+    positions = np.asarray(trace["cloth_positions_m"])
+    if (
+        positions.shape != np.asarray(state["rest_positions"]).shape
+        or not np.isfinite(positions).all()
+    ):
+        raise ValueError("render-only replay positions do not match recorded mesh")
+    hook = getattr(env, "restore_recorded_geometry", None)
+    if not callable(hook):
+        raise RuntimeError(
+            "backend lacks restore_recorded_geometry render-only hook; physical restore is forbidden"
+        )
+    # Import the untouched original envelope. The hook validates its content hash
+    # and exact mesh, and latches the backend into render-only mode. Keep that
+    # latch across frames; update geometry through the native public setter.
+    if getattr(env, "_replay_source_state", None) is not state:
+        hook(state)
+        env._replay_source_state = state
+    env.cloth.set_particles_pos(positions.copy())
+    if not np.array_equal(env.get_positions(), positions):
+        raise RuntimeError("render-only geometry readback differs from recorded positions")
 
 
 def render_replay(
@@ -255,7 +311,8 @@ def render_replay(
         output_dir / "video-metadata.json"
     ).exists():
         raise FileExistsError("replay output already exists; choose a fresh directory")
-    if backend_factory is None:
+    native_template = backend_factory is None
+    if native_template:
         from cloth_fling.sim.backend import GenesisBackend
 
         backend_factory = GenesisBackend
@@ -270,7 +327,12 @@ def render_replay(
         writer_factory=writer_factory,
     ) as recorder:
         for index, action in enumerate(actions):
-            config = SceneConfig(**json.loads(str(action.state["config_json"])))
+            template = json.loads(str(action.state["config_json"]))
+            if native_template:
+                # The new backend rejects archival contact laws. This selects
+                # its current template only; replay never executes that law.
+                template["contact_profile"] = "native_coulomb_v2"
+            config = SceneConfig(**template)
             kwargs = {} if appearance is None else {"appearance": appearance}
             with backend_factory(config, **kwargs) as env:
                 # Defense in depth: refuse scene AND wrapper stepping/reset paths.
@@ -278,6 +340,10 @@ def render_replay(
                 env.reset = _forbidden_step
                 env.scene.step = _forbidden_step
                 env.scene.reset = _forbidden_step
+                env.restore = _forbidden_step
+                source_engine = source_engine_identity(action.state)
+                recorder.source_engines[json.dumps(source_engine, sort_keys=True)] = source_engine
+                recorder.source_configs[action.label] = json.loads(str(action.state["config_json"]))
                 recorder.start_action(action.label)
                 recorder.table_height_m = action.table_height_m
                 recorder.particle_radius_m = (
@@ -287,7 +353,7 @@ def render_replay(
                     if len(recorder.samples) >= max_frames:
                         truncated = True
                         break
-                    env.restore(replay_state(action.state, trace))
+                    render_recorded_state(env, action.state, trace)
                     recorder.capture(env, trace, replay=True)
             for name, reference in action.original_rgb.items():
                 from PIL import Image
@@ -315,6 +381,7 @@ def render_replay(
     metadata.update(
         original_video_recorded=False,
         physics_reexecuted=False,
+        geometry_import="render-only; exact recorded faces and rest vertices; no physical restore",
         trajectory_sampling="last saved mesh at or before frame time; no interpolation",
         original_observations=copied,
         truncated=truncated,

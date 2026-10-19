@@ -67,21 +67,33 @@ def debug_markers(scene, positions):
 
 @contextmanager
 def preserved_camera(camera):
-    """Restore public transform and Genesis 0.4.3 redundant pose fields exactly."""
+    """Restore public transform and Genesis 1.4.4 batched pose fields exactly."""
     if getattr(camera, "_in_recording", False):
         raise RuntimeError("debug capture requires camera native recording to be disabled")
+    if (
+        getattr(camera, "_batch_renderer", None) is not None
+        or getattr(camera, "_raytracer", None) is not None
+    ):
+        raise RuntimeError("debug capture requires the native rasterizer camera")
     transform = np.asarray(camera.transform).copy()
     fields = {}
     for name in ("_pos", "_lookat", "_up", "_transform", "_quat"):
         if hasattr(camera, name):
             value = getattr(camera, name)
             fields[name] = value.clone() if hasattr(value, "clone") else copy.deepcopy(value)
+    debug = camera._debug
     try:
+        # 1.4.4 skips native markers for non-debug cameras. Scope the flag to
+        # RGB-only capture; restore it before any subsequent policy rendering.
+        camera._debug = True
         yield
     finally:
-        camera.set_pose(transform=transform)
-        for name, value in fields.items():
-            getattr(camera, name)[...] = value
+        try:
+            camera.set_pose(transform=transform)
+        finally:
+            for name, value in fields.items():
+                getattr(camera, name)[...] = value
+            camera._debug = debug
 
 
 def render_debug_views(env, *, phase, selected_targets_m=None, attachment_ids=None):
@@ -209,6 +221,19 @@ def file_sha256(path):
     return digest.hexdigest()
 
 
+def renderer_engine_identity(env):
+    """Identify the renderer without importing or initializing a simulator."""
+    native = getattr(env, "_gs", None)
+    version = getattr(native, "__version__", None)
+    return {
+        "name": "genesis",
+        "version": version,
+        "runtime_generation": f"genesis-{version}" if version else "unknown",
+        "renderer": "native-rasterizer",
+        "backend_identity": getattr(env, "runtime_identity", None),
+    }
+
+
 class VideoRecorder:
     """Callable sampled-trace observer for execute_action(trace_callback=recorder).
 
@@ -247,6 +272,9 @@ class VideoRecorder:
         self.fps = self.writers["combined"].fps
         self.samples, self.action, self._last_time = [], 0, None
         self.physics_configs = {}
+        self.renderer_engines = {}
+        self.source_engines = {}
+        self.source_configs = {}
         self._closed, self._complete = False, False
         self._failure = None
 
@@ -307,6 +335,11 @@ class VideoRecorder:
         if not self.samples:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             Image.fromarray(combined).save(self.output_dir / "preview.png")
+        engine = renderer_engine_identity(env)
+        engine_key = json.dumps(engine, sort_keys=True, allow_nan=False)
+        self.renderer_engines[engine_key] = engine
+        if self.kind == "native_render_capture":
+            self.source_engines[engine_key] = engine
         config_json = json.dumps(
             env.config.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False
         )
@@ -314,6 +347,7 @@ class VideoRecorder:
         self.physics_configs[config_hash] = env.config.to_dict()
         self.samples.append(
             {
+                "renderer_engine": engine,
                 "physics_config_sha256": config_hash,
                 "action": self.action,
                 "phase": phase,
@@ -356,6 +390,13 @@ class VideoRecorder:
                 self.appearance.to_dict() if self.appearance is not None else {"mode": "legacy"}
             ),
             "physics_configs": self.physics_configs,
+            "source_configs": self.source_configs,
+            "render_template_configs": self.physics_configs
+            if self.kind == "reconstructed_replay"
+            else {},
+            "renderer_engines": list(self.renderer_engines.values()),
+            "source_engines": list(self.source_engines.values()),
+            "runtime_qualification_inherited": False,
             "markers": {"radius_m": MARKER_RADIUS_M, "positions": "measured when attached"},
             "sampling": "sampled traces at nominal encoded fps; see actual trace timestamps",
             "table_height_m": self.table_height_m,
@@ -364,6 +405,9 @@ class VideoRecorder:
                 {
                     **w.metadata(),
                     "kind": self.kind,
+                    "renderer_engines": list(self.renderer_engines.values()),
+                    "source_engines": list(self.source_engines.values()),
+                    "runtime_qualification_inherited": False,
                     "captured_during_execution": self.kind == "native_render_capture",
                     "physics_config_sha256": list(self.physics_configs),
                     "appearance": self.appearance.to_dict()

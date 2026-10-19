@@ -91,13 +91,15 @@ def make_surface(genesis, appearance: AppearanceConfig | None = None):
 def install_visual_texture(scene, table, genesis, appearance: AppearanceConfig):
     """Before scene.build(): table VISUAL meshes only; collision meshes untouched.
 
-    Use a native PBR material because Genesis 0.4.3's surface-to-SimpleMaterial
-    conversion otherwise loses roughness and metallic. UVs use local table x/y.
+    The audited 1.4.4 surface_uvs_to_trimesh_visual still converts non-emissive
+    image textures to SimpleMaterial without roughness/metallic. Supply PBR on
+    the table's visual trimesh, which RigidVGeom.get_trimesh passes to pyrender.
+    UVs use local table x/y; no geometry or collision descriptor is replaced.
     """
     if appearance.mode == "legacy":
         return
-    if genesis.__version__ != "0.4.3" or scene.is_built:
-        raise RuntimeError("texture installation requires unbuilt Genesis 0.4.3 scene")
+    if genesis.__version__ != "1.4.4" or scene.is_built:
+        raise RuntimeError("texture installation requires unbuilt Genesis 1.4.4 scene")
     from PIL import Image
     from trimesh.visual.material import PBRMaterial
     from trimesh.visual.texture import TextureVisuals
@@ -131,13 +133,17 @@ def install_native_material(scene, table, genesis, appearance: AppearanceConfig)
     """
     if appearance.mode == "legacy":
         return
-    if genesis.__version__ != "0.4.3" or not scene.is_built:
-        raise RuntimeError("native material inspection requires built Genesis 0.4.3 scene")
+    if genesis.__version__ != "1.4.4" or not scene.is_built:
+        raise RuntimeError("native material inspection requires built Genesis 1.4.4 scene")
     context = scene.visualizer.context
+    if not table.vgeoms:
+        raise RuntimeError("table has no visual geometry")
     for geom in table.vgeoms:
         node = context.rigid_nodes.get(geom.uid)
         if node is None:
             raise RuntimeError("table native raster node missing")
+        if not node.mesh.primitives:
+            raise RuntimeError("table native raster primitives missing")
         for primitive in node.mesh.primitives:
             material = primitive.material
             if (
@@ -145,5 +151,6 @@ def install_native_material(scene, table, genesis, appearance: AppearanceConfig)
                 or material.metallicFactor != appearance.metallic
                 or material.baseColorTexture is None
                 or primitive.texcoord_0 is None
+                or not np.isfinite(primitive.texcoord_0).all()
             ):
                 raise RuntimeError("native table material readback failed")

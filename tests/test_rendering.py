@@ -14,6 +14,7 @@ from cloth_fling.rendering import (
     VideoRecorder,
     debug_markers,
     marker_positions,
+    preserved_camera,
     render_debug_views,
 )
 from cloth_fling.sim.appearance import (
@@ -47,6 +48,7 @@ class Camera:
         self.scene = scene
         self.transform = np.eye(4)
         self._lookat = np.array([0.0, 0.0, -1.8])
+        self._debug = False
         self.calls = 0
         self.fail_at = None
 
@@ -60,6 +62,7 @@ class Camera:
 
     def render(self, **kwargs):
         assert kwargs == dict(rgb=True, depth=False, antialiasing=False, force_render=True)
+        assert self._debug is True
         self.calls += 1
         if self.calls == self.fail_at:
             raise RuntimeError("render failed")
@@ -74,6 +77,8 @@ class Env:
         self.v = np.ones_like(self.p)
         self.attached_ids = (0, 1)
         self.config = SceneConfig(image_size=16)
+        self._gs = SimpleNamespace(__version__="1.4.4")
+        self.runtime_identity = {"genesis_version": "1.4.4", "snapshot_schema_version": 2}
         self.simulated_time = 3.0
         self._observation = SimpleNamespace(rgb=np.ones((16, 16, 3)), depth=np.ones((16, 16)))
         self._targets = np.zeros((2, 3))
@@ -112,6 +117,38 @@ def test_measured_markers_and_immediate_release_hiding():
         marker_positions(env.p, (-1, 0), "lift")
 
 
+def test_batched_native_pose_fields_and_debug_flag_restore_even_when_set_pose_fails():
+    camera = Camera(DebugScene())
+    for name, shape in (
+        ("_pos", (1, 3)),
+        ("_up", (1, 3)),
+        ("_quat", (1, 4)),
+        ("_transform", (1, 4, 4)),
+    ):
+        setattr(camera, name, np.ones(shape))
+    saved = {k: v.copy() for k, v in camera.__dict__.items() if isinstance(v, np.ndarray)}
+    with pytest.raises(RuntimeError, match="restore failure"):
+        with preserved_camera(camera):
+            assert camera._debug
+            for name in saved:
+                if name.startswith("_"):
+                    getattr(camera, name)[:] = 2
+            camera.set_pose = lambda **kw: (_ for _ in ()).throw(RuntimeError("restore failure"))
+    assert not camera._debug
+    for name, value in saved.items():
+        if name.startswith("_"):
+            np.testing.assert_array_equal(getattr(camera, name), value)
+
+
+@pytest.mark.parametrize("field", ["_batch_renderer", "_raytracer"])
+def test_non_raster_camera_fails_before_drawing(field):
+    env = Env()
+    setattr(env.camera, field, object())
+    with pytest.raises(RuntimeError, match="native rasterizer"):
+        render_debug_views(env, phase="lift")
+    assert not env.scene.drawn
+
+
 @pytest.mark.parametrize("failure", [None, 1, 3])
 def test_native_debug_preserves_camera_state_policy_caches_and_unrelated_objects(failure):
     env = Env()
@@ -125,6 +162,7 @@ def test_native_debug_preserves_camera_state_policy_caches_and_unrelated_objects
         views = render_debug_views(env, phase="lift")
         assert set(views) == {"overhead", "oblique"}
     assert set(env.scene.objects) == {"unrelated"}
+    assert env.camera._debug is False
     assert env._observation is observation
     np.testing.assert_array_equal(env._observation.rgb, original["_observation"].rgb)
     np.testing.assert_array_equal(env._observation.depth, original["_observation"].depth)
@@ -222,7 +260,7 @@ def test_table_native_pbr_only_changes_visual_material():
     geom = SimpleNamespace(uid="table", vmesh=SimpleNamespace(trimesh=mesh))
     table = SimpleNamespace(vgeoms=[geom])
     scene = SimpleNamespace(is_built=False)
-    gs = SimpleNamespace(__version__="0.4.3")
+    gs = SimpleNamespace(__version__="1.4.4")
     config = AppearanceConfig()
     install_visual_texture(scene, table, gs, config)
     np.testing.assert_array_equal(mesh.vertices, vertices)
@@ -294,3 +332,4 @@ def test_disabled_native_offscreen_markers_fail_clearly(monkeypatch, disabled_at
         render_debug_views(env, phase="lift")
     assert not env.scene.drawn and env.camera.calls == 0
     assert set(env.scene.objects) == {"unrelated"}
+    assert env.camera._debug is False
