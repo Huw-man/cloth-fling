@@ -22,6 +22,13 @@ The user authorized fresh Genesis 1.4.4 laydown qualification and a bounded pair
 pilot on one synthetic 0.50 m square cloth. Milestone 2 results remain historical.
 The complete stage/gate contract is in `docs/milestone3.md`.
 
+The first bounded run stopped at reset preparation on 2026-10-19: development
+6/6, held-out 5/6 after all twelve held-out candidates. The frozen manifest in
+`runs/milestone3/` is terminal (`pool_limitation`). Qualification, continuity,
+fling diagnostics and pilot behavior are not evaluated. Existing benchmark
+prepare/qualify/pilot commands must return this stop offline, without opening a
+scene or consuming additional seeds/actions. See `docs/milestone3-results.md`.
+
 Three new Herdr worktrees own fixtures/manifest/reporting, primitive diagnostics,
 and collection metadata/verification/recordings. The coordinator owns interfaces,
 CLI, integration, exclusive RTX 5080 lease, and execution. Integrate reviewed

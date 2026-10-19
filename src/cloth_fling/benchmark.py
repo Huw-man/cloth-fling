@@ -1331,6 +1331,14 @@ def report_benchmark(output_dir):
             "status": gate_status,
             "checks": gate_checks,
         },
+        "offline_analysis_figures": [
+            {"path": name, "sha256": file_sha256(root / name), "label": label}
+            for name, label in (
+                ("analysis/preparation-coverage.png", "Pre-action reset acceptance"),
+                ("analysis/saved-geometry.png", "Saved geometry; offline plots, not native RGB"),
+            )
+            if (root / name).is_file()
+        ],
     }
     atomic_write(root, "benchmark-report.json", json_bytes(report))
     atomic_write(root, "index.html", _review_html(report).encode())
@@ -1386,6 +1394,11 @@ def _review_html(report):
     chunks.append(
         "</table></details><p>Accepted and rejected state bundles are privileged execution/evaluation artifacts. They are not learned RGB observations.</p>"
     )
+    for figure in report.get("offline_analysis_figures", []):
+        chunks.append(
+            f"<figure><img style='max-width:100%' src='{esc(quote(figure['path'], safe='/'))}' "
+            f"alt='{esc(figure['label'])}'><figcaption>{esc(figure['label'])}</figcaption></figure>"
+        )
     for split, summaries in report["splits"].items():
         chunks.append(
             f"<h2>{esc(split)}</h2><table><tr><th>Selector</th><th>Complete/groups</th><th>Final coverage</th><th>Gain</th><th>Success fraction</th><th>Invalid attempts</th><th>No pair</th></tr>"
@@ -1395,6 +1408,11 @@ def _review_html(report):
             chunks.append(
                 f"<tr><td>{esc(selector)}</td><td>{s['complete_episodes']}/{s['groups']}</td><td>{number(s['mean_final_coverage'])}</td><td>{number(s['mean_final_improvement'])}</td><td>{number(s['success_fraction_coverage_ge_0_95'])}</td><td>{number(s['invalid_attempt_fraction'])}</td><td>{number(s['no_pair_episode_fraction'])}</td></tr>"
             )
+        if not any(summaries[selector]["mean_curve"] for selector in SELECTORS):
+            chunks.append(
+                "</table><p>No pilot actions: coverage-versus-action curves are not evaluated.</p>"
+            )
+            continue
         chunks.append(
             "</table><svg viewBox='0 0 640 270' role='img' aria-label='Mean confirmed settled coverage versus action'>"
         )

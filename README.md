@@ -4,6 +4,12 @@ Robotless cloth unfolding with overhead RGB, two explicitly assisted grasp point
 deterministic motion primitives, and local Parquet/image/state datasets. Inspired by
 [FlingBot](https://proceedings.mlr.press/v164/ha22a.html).
 
+The [milestone 3 benchmark](docs/milestone3.md) adds bounded `benchmark prepare`,
+`qualify`, `pilot`, and `report` stages. Its first run stopped at preparation:
+six development bunches qualified, but only five of the required six held-out
+bunches qualified. See [results](docs/milestone3-results.md). Motion and pilot
+behavior remain unqualified; the frozen failed manifest cannot resume simulation.
+
 ## Install and check Genesis 1.4.4
 
 Version 0.2.0 pins **Genesis 1.4.4**, the latest stable release checked on 2026-10-19,

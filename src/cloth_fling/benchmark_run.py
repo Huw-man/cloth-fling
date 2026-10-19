@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import copy
 import fcntl
+import hashlib
 import json
+import signal
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, replace
@@ -20,6 +23,29 @@ from cloth_fling.sim.primitives import PrimitiveConfig
 
 def _write(root, name, value):
     atomic_write(Path(root), name, json_bytes(value))
+
+
+@contextmanager
+def _reservation_deadline(deadline):
+    """Tighten an active collector timer without losing its parent deadline."""
+    from cloth_fling.collection import CollectionTimeout, _deadline
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise CollectionTimeout("benchmark reservation wall budget exhausted")
+    previous = signal.getitimer(signal.ITIMER_REAL)
+    if previous == (0.0, 0.0):
+        with _deadline(deadline):
+            yield
+        return
+    started = time.monotonic()
+    signal.setitimer(signal.ITIMER_REAL, min(previous[0], remaining))
+    try:
+        yield
+    finally:
+        signal.setitimer(
+            signal.ITIMER_REAL, max(1e-6, previous[0] - (time.monotonic() - started)), previous[1]
+        )
 
 
 @contextmanager
@@ -51,28 +77,116 @@ def _restore(env, state):
     return again
 
 
+_SCIENTIFIC_FAILURES = {
+    "cloth_strain_limit",
+    "premature_table_contact",
+    "attachment_target_outside_workspace",
+    "lift_max_height",
+    "command_kinematic_limit",
+    "degenerate_grasp_axis",
+    "initial_span_exceeds_rest_bound",
+    "tauten_rest_span_limit",
+    "settle_timeout",
+    "grasp_not_rgb_foreground",
+    "infeasible_action_geometry",
+    "grasp_above_lift_height",
+    "release_not_near_table",
+    "simulated_deadline",
+    "wall_deadline",
+    "attachment_lost_or_changed",
+}
+
+
 def _unsafe(report):
-    """Scientific failures are retained; broken infrastructure stops dependent work."""
-    text = json.dumps(report, default=str).lower()
-    return (
-        any(
-            word in text
-            for word in (
-                "restore_mismatch",
-                "restore_readback",
-                "restore mismatch",
-                'recording_failed": true',
-                "contact_accounting_capture_failed",
-                "trace_callback_failed",
-                "observation_chain",
-                "corrupt",
-            )
-        )
-        or report.get("final_restore_valid") is False
-    )
+    """Explicit scientific failures remain outcomes; unknown/backend failures stop work."""
+    if not isinstance(report, dict):
+        return True
+    if (
+        report.get("infrastructure_errors")
+        or report.get("recording_failed")
+        or report.get("artifact_errors")
+        or report.get("close_error")
+        or report.get("snapshot_error")
+        or report.get("release_error")
+        or report.get("reset_failures", 0)
+    ):
+        return True
+    if report.get("terminal_observation_valid") is False:
+        return True
+    if "final_restore_valid" in report and report["final_restore_valid"] is not True:
+        return True
+    if any(c.get("valid") is not True for c in report.get("restore_checks", [])):
+        return True
+    for error in report.get("errors", []):
+        if (
+            not isinstance(error, dict)
+            or error.get("type") not in {"PrimitiveFailure", "DeadlineExceeded"}
+            or error.get("message") not in _SCIENTIFIC_FAILURES
+        ):
+            return True
+    if "execution_valid" in report and "reason" in report:
+        if type(report["execution_valid"]) is not bool:
+            return True
+        if not report["execution_valid"] and report["reason"] not in _SCIENTIFIC_FAILURES:
+            return True
+    for key in ("diagnostics", "evidence", "recording"):
+        if key in report and _unsafe(report[key]):
+            return True
+    for key in ("runs", "recordings"):
+        if key in report:
+            if not isinstance(report[key], list) or any(_unsafe(x) for x in report[key]):
+                return True
+            if key == "runs" and not report[key]:
+                return True
+    if "episode_reports" in report:
+        if report.get("stop_reason") != "completed":
+            return True
+        permitted = {
+            "max_actions",
+            "no_valid_pair",
+            "execution_invalid",
+            "environment_terminated",
+            "initially_unfolded",
+            "settled_coverage_threshold",
+        }
+        if any(e.get("end_reason") not in permitted for e in report["episode_reports"]):
+            return True
+    return False
 
 
-def _attempt(env, root, ledger, fixture, state, pair, config, tag, *, primitive="laydown"):
+def _protected_motion_hash(source):
+    """Only laydown trajectory/config declarations may differ in the one revision."""
+    tree = ast.parse(source)
+
+    class Protected(ast.NodeTransformer):
+        def visit_FunctionDef(self, node):
+            if node.name.startswith("_laydown_"):
+                return None
+            return self.generic_visit(node)
+
+        def visit_AnnAssign(self, node):
+            if isinstance(node.target, ast.Name) and node.target.id.startswith("laydown_"):
+                return None
+            return self.generic_visit(node)
+
+        def visit_Assign(self, node):
+            if any(
+                isinstance(t, ast.Name) and t.id == "PRIMITIVE_CONFIG_VERSION" for t in node.targets
+            ):
+                return None
+            return self.generic_visit(node)
+
+        def visit_If(self, node):
+            if ast.unparse(node.test) == "action.primitive == 'laydown'":
+                node.body = [ast.Pass()]
+            return self.generic_visit(node)
+
+    return hashlib.sha256(ast.dump(Protected().visit(tree)).encode()).hexdigest()
+
+
+def _attempt(
+    env, root, ledger, fixture, state, pair, config, tag, *, primitive="laydown", allow_execute=True
+):
     from cloth_fling.diagnostics import run_diagnostic
 
     category = "diagnostic_laydown" if primitive == "laydown" else "diagnostic_fling"
@@ -83,13 +197,27 @@ def _attempt(env, root, ledger, fixture, state, pair, config, tag, *, primitive=
         if (
             receipt is None
             or receipt["status"] != "finished"
+            or receipt["metadata"].get("fixture_id") != fixture.get("fixture_id")
             or receipt["result"].get("sha256") != file_sha256(destination / "diagnostic.json")
         ):
             raise ValueError("unreconciled or corrupted diagnostic; do not replay")
         report = json.loads((destination / "diagnostic.json").read_text())
-        if report["config"] != asdict(config) or report["fixed_pixels"] != pair["pixels"]:
+        if (
+            fixture.get("state_sha256") is not None
+            and report.get("provenance", {}).get("source_reset_sha256") != fixture["state_sha256"]
+        ):
+            raise ValueError("cached diagnostic source fixture mismatch")
+        if (
+            asdict(PrimitiveConfig(**report["config"])) != asdict(config)
+            or report["fixed_pixels"] != pair["pixels"]
+            or [r["primitive"] for r in report["runs"]] != [primitive]
+        ):
             raise ValueError("diagnostic cache configuration/pair mismatch")
+        if _unsafe(report):
+            raise RuntimeError("cached diagnostic infrastructure stop")
         return report
+    if not allow_execute:
+        raise ValueError("complete initial diagnostic schedule required before revision")
     token = ledger.reserve(
         category,
         wall_seconds=180,
@@ -139,6 +267,39 @@ def _laydown_pass(rows):
     return all(folds.values()) and len(drops) >= 4
 
 
+def _validate_case(root, directory, *, report_ref=None):
+    from cloth_fling.data import read_support, read_transitions, verify_dataset
+
+    path = directory / "benchmark-case.json"
+    expected = (
+        Path(str(path) + ".sha256").read_text().strip()
+        if report_ref is None
+        else report_ref["sha256"]
+    )
+    if file_sha256(path) != expected:
+        raise ValueError("corrupted benchmark case report")
+    report = json.loads(path.read_text())
+    if _unsafe(report) or not verify_dataset(directory)["valid"]:
+        raise RuntimeError("cached benchmark infrastructure/artifact stop")
+    rows = read_transitions(directory).to_pylist()
+    audit = report.get("benchmark_chain_audit", {})
+    if (
+        audit.get("restores") != 1
+        or audit.get("resets") != 0
+        or audit.get("actions") != len(rows)
+        or audit.get("selections", [])[: len(rows)] != [r["before_observation_id"] for r in rows]
+    ):
+        raise RuntimeError("cached benchmark observation_chain audit mismatch")
+    for row in rows:
+        support = read_support(directory, row["evidence_path"])
+        if _unsafe(row) or _unsafe(support.get("diagnostics", {})):
+            raise RuntimeError("cached benchmark infrastructure stop")
+    for before, after in zip(rows, rows[1:]):
+        if before["after_observation_id"] != after["before_observation_id"]:
+            raise RuntimeError("cached benchmark observation_chain mismatch")
+    return report, rows
+
+
 class _EpisodeGuard:
     """Audit one boundary restore and fresh observations without modifying physics."""
 
@@ -146,6 +307,7 @@ class _EpisodeGuard:
         self.env, self.state = env, state
         self.restores = self.resets = self.actions = 0
         self.last_after_id = None
+        self.deadline = None
 
     def __getattr__(self, name):
         return getattr(self.env, name)
@@ -160,7 +322,11 @@ class _EpisodeGuard:
         from cloth_fling.diagnostics import _fingerprint
 
         # The independent saved state hash is checked before the collector begins.
-        obs = self.env.restore(state)
+        if self.deadline is None:
+            obs = self.env.restore(state)
+        else:
+            with _reservation_deadline(self.deadline()):
+                obs = self.env.restore(state)
         if self.env.snapshot()["state_hash"] != self.state["state_hash"]:
             raise RuntimeError("benchmark state restore readback mismatch")
         self.restores += 1
@@ -188,7 +354,7 @@ def _collect_case(
     threshold=None,
 ):
     from cloth_fling.collection import collect_episodes
-    from cloth_fling.data import read_transitions, verify_dataset
+    from cloth_fling.data import read_support, read_transitions, verify_dataset
     from cloth_fling.selection import select_action
     from cloth_fling.sim.primitives import execute_action
 
@@ -198,6 +364,8 @@ def _collect_case(
         "token": ledger.reserve("simulator", wall_seconds=180, key=f"{key}:setup"),
         "started": time.monotonic(),
     }
+    guarded.deadline = lambda: overhead["started"] + 180
+    infrastructure = []
 
     def selector(observation, scene_config, **kwargs):
         if guarded.actions and observation.observation_id != guarded.last_after_id:
@@ -207,7 +375,16 @@ def _collect_case(
             return GraspAction(
                 tuple(map(tuple, reviewed_first["pixels"])), policy="reviewed_visible_rest"
             )
-        return select_action(observation, scene_config, **kwargs)
+        from cloth_fling.selection import NoValidPairError
+
+        try:
+            with _reservation_deadline(overhead["started"] + 180):
+                return select_action(observation, scene_config, **kwargs)
+        except NoValidPairError:
+            raise
+        except BaseException as exc:
+            infrastructure.append(f"selection: {type(exc).__name__}: {exc}")
+            raise
 
     def executor(current, action, *, config, trace_callback=None):
         ledger.finish(
@@ -231,9 +408,17 @@ def _collect_case(
         meter["attempts"] += 1
         guarded.actions += 1
         try:
-            outcome = execute_action(current, action, config=config, trace_callback=trace_callback)
+            with _reservation_deadline(tick + min(150, config.max_wall_seconds)):
+                outcome = execute_action(
+                    current, action, config=config, trace_callback=trace_callback
+                )
         except BaseException as exc:
+            infrastructure.append(f"execution: {type(exc).__name__}: {exc}")
             ledger.abandon(token, result={"error": str(exc)})
+            overhead["token"] = ledger.reserve(
+                "simulator", wall_seconds=180, key=f"{key}:cleanup:{meter['attempts']}"
+            )
+            overhead["started"] = time.monotonic()
             raise
         elapsed = time.monotonic() - tick
         meter["action_wall_seconds"] += elapsed
@@ -287,9 +472,18 @@ def _collect_case(
         "actions": guarded.actions,
     }
     report["benchmark_wall_seconds"] = time.monotonic() - started
+    if infrastructure:
+        report["infrastructure_errors"] = infrastructure
     verified = verify_dataset(directory)
     report["dataset_verification"] = verified
     rows = read_transitions(directory).to_pylist()
+    if any(
+        _unsafe(row)
+        or _unsafe(read_support(directory, row["evidence_path"]).get("diagnostics", {}))
+        for row in rows
+    ):
+        infrastructure.append("persisted action reports an infrastructure failure")
+        report["infrastructure_errors"] = infrastructure
     for before, after in zip(rows, rows[1:]):
         if before["after_observation_id"] != after["before_observation_id"]:
             raise RuntimeError("benchmark observation_chain dataset mismatch")
@@ -297,6 +491,11 @@ def _collect_case(
         _write(root, str((directory / "benchmark-case.json").relative_to(root)), report)
         raise RuntimeError("benchmark artifact/restore/recording regression")
     _write(root, str((directory / "benchmark-case.json").relative_to(root)), report)
+    atomic_write(
+        root,
+        str((directory / "benchmark-case.json.sha256").relative_to(root)),
+        (file_sha256(directory / "benchmark-case.json") + "\n").encode(),
+    )
     if overhead["token"] is not None:
         ledger.finish(
             overhead["token"],
@@ -311,10 +510,12 @@ def _finalize_qualification(env, root, ledger, manifest, laydown, pairs):
     from cloth_fling.selection import SelectionConfig
 
     # The fling profile is frozen before this separate diagnostic track.
-    fling_config = PrimitiveConfig()
+    frozen_plan = json.loads((root / "motion-plan.json").read_text())
+    fling_config = PrimitiveConfig(**frozen_plan["fling"])
     dev = [f for f in manifest["fixtures"] if f["split"] == "development"]
+    compared = {r["fixture_id"]: r for r in laydown["validation"] if r["execution_valid"]}
     flings = []
-    for fixture in dev[:6]:
+    for fixture in [f for f in dev if f["fixture_id"] in compared][:6]:
         tag = f"{fixture['fixture_id']}-fling"
         _attempt(
             env,
@@ -322,7 +523,7 @@ def _finalize_qualification(env, root, ledger, manifest, laydown, pairs):
             ledger,
             fixture,
             load_fixture(root, fixture["fixture_id"]),
-            pairs["pairs"][fixture["fixture_id"]][0],
+            pairs["pairs"][fixture["fixture_id"]][compared[fixture["fixture_id"]]["pair_index"]],
             fling_config,
             tag,
             primitive="fling",
@@ -335,7 +536,9 @@ def _finalize_qualification(env, root, ledger, manifest, laydown, pairs):
                     "sha256": file_sha256(root / "diagnostics" / tag / "diagnostic.json"),
                 },
                 "primitive_config": asdict(fling_config),
-                "pixels": pairs["pairs"][fixture["fixture_id"]][0]["pixels"],
+                "pixels": pairs["pairs"][fixture["fixture_id"]][
+                    compared[fixture["fixture_id"]]["pair_index"]
+                ]["pixels"],
                 "stage": "frozen_fling",
             }
         )
@@ -347,12 +550,7 @@ def _finalize_qualification(env, root, ledger, manifest, laydown, pairs):
         directory = root / "continuity" / fixture["fixture_id"]
         summary = directory / "benchmark-case.json"
         if summary.exists():
-            report = json.loads(summary.read_text())
-            from cloth_fling.data import read_transitions, verify_dataset
-
-            if not verify_dataset(directory)["valid"]:
-                raise RuntimeError("corrupted continuity dataset")
-            rows = read_transitions(directory).to_pylist()
+            report, rows = _validate_case(root, directory)
         else:
             report, rows = _collect_case(
                 env,
@@ -389,7 +587,7 @@ def _finalize_qualification(env, root, ledger, manifest, laydown, pairs):
         "benchmark_identity": manifest["identity"],
         "passed": completed >= 2,
         "primitive_config": {"laydown": laydown["config"], "fling": asdict(fling_config)},
-        "selection_config": asdict(SelectionConfig()),
+        "selection_config": asdict(SelectionConfig(**frozen_plan["selection_config"])),
         "laydown_runs": [
             {
                 "fixture_id": r["fixture_id"],
@@ -479,6 +677,7 @@ def _qualify(
     revision_reason=None,
 ):
     from cloth_fling.benchmark import load_fixture
+    from cloth_fling.selection import SelectionConfig
 
     if (root / "reviewed-pairs.json").exists():
         pairs = _review(env, root, manifest)
@@ -507,6 +706,10 @@ def _qualify(
         "candidate": asdict(candidate),
         "fling": asdict(PrimitiveConfig()),
         "selection": "existing defaults",
+        "selection_config": asdict(SelectionConfig()),
+        "protected_motion_sha256": _protected_motion_hash(
+            (Path(__file__).parent / "sim" / "primitives.py").read_text()
+        ),
         "pairs_sha256": file_sha256(root / "reviewed-pairs.json"),
         "primitive_implementation_sha256": file_sha256(
             Path(__file__).parent / "sim" / "primitives.py"
@@ -518,13 +721,18 @@ def _qualify(
             raise ValueError("frozen initial motion configuration mismatch")
         if original_plan["pairs_sha256"] != plan["pairs_sha256"]:
             raise ValueError("frozen reviewed pairs changed")
+        if revision_checks and (
+            original_plan["protected_motion_sha256"] != plan["protected_motion_sha256"]
+            or original_plan["selection_config"] != plan["selection_config"]
+        ):
+            raise ValueError("revision changed protected motion/guards/selection")
     else:
         if revision_checks:
             raise ValueError("revision requires measured initial diagnostics")
         _write(root, plan_path.name, plan)
     all_rows = []
 
-    def diagnostic(f, config, pair_index, tag):
+    def diagnostic(f, config, pair_index, tag, *, allow_execute=True):
         report = _attempt(
             env,
             root,
@@ -534,6 +742,7 @@ def _qualify(
             pairs["pairs"][f["fixture_id"]][pair_index],
             config,
             tag,
+            allow_execute=allow_execute,
         )
         row = {
             k: report["runs"][0][k]
@@ -557,33 +766,34 @@ def _qualify(
         _write(root, "laydown-progress.json", {"runs": all_rows})
         return row
 
-    if revision_checks:
-        all_rows = json.loads((root / "laydown-progress.json").read_text())["runs"]
-        all_rows = [r for r in all_rows if "revision" not in r["diagnostic_ref"]]
-        entries = json.loads((root / "benchmark-budget.json").read_text())["entries"]
-        for row in all_rows:
-            receipt = next(
-                (
-                    e
-                    for e in entries
-                    if e.get("result", {}).get("diagnostic_ref") == row["diagnostic_ref"]
-                ),
-                None,
+    initial_plan = json.loads(plan_path.read_text())
+    reference = PrimitiveConfig(**initial_plan["reference"])
+    candidate = PrimitiveConfig(**initial_plan["candidate"])
+    for f in fixtures:
+        if f["kind"] == "fold":
+            diagnostic(
+                f, reference, 0, f"{f['fixture_id']}-reference", allow_execute=not revision_checks
             )
-            if receipt is None or receipt["result"]["sha256"] != file_sha256(
-                root / row["diagnostic_ref"]
+            diagnostic(
+                f, candidate, 0, f"{f['fixture_id']}-candidate", allow_execute=not revision_checks
+            )
+    for f in fixtures:
+        if f["kind"] == "drop":
+            row = diagnostic(
+                f, candidate, 0, f"{f['fixture_id']}-candidate-0", allow_execute=not revision_checks
+            )
+            options = pairs["pairs"][f["fixture_id"]]
+            if (
+                not (row["execution_valid"] and row["coverage_gain"] >= 0.10)
+                and options[0]["pixels"] != options[1]["pixels"]
             ):
-                raise ValueError("initial diagnostic artifact changed before revision")
-    else:
-        for f in fixtures:
-            if f["kind"] == "fold":
-                diagnostic(f, PrimitiveConfig(), 0, f"{f['fixture_id']}-reference")
-                diagnostic(f, candidate, 0, f"{f['fixture_id']}-candidate")
-        for f in fixtures:
-            if f["kind"] == "drop":
-                row = diagnostic(f, candidate, 0, f"{f['fixture_id']}-candidate-0")
-                if not (row["execution_valid"] and row["coverage_gain"] >= 0.10):
-                    diagnostic(f, candidate, 1, f"{f['fixture_id']}-candidate-1")
+                diagnostic(
+                    f,
+                    candidate,
+                    1,
+                    f"{f['fixture_id']}-candidate-1",
+                    allow_execute=not revision_checks,
+                )
     validation = [r for r in all_rows if r["config"] == asdict(candidate)]
     if not _laydown_pass(validation):
         if not revision_checks:
@@ -600,6 +810,12 @@ def _qualify(
         changes = {k for k, v in asdict(revised).items() if asdict(original)[k] != v}
         if any(not k.startswith("laydown_") for k in changes):
             raise ValueError("revision may change only targeted laydown trajectory settings")
+        if (
+            not changes
+            and plan["primitive_implementation_sha256"]
+            == initial_plan["primitive_implementation_sha256"]
+        ):
+            raise ValueError("revision requires a concrete trajectory implementation/config change")
         frozen = {
             "config": asdict(revised),
             "measured_reason": revision_reason,
@@ -643,9 +859,14 @@ def run_benchmark_stage(
     if stage == "report":
         from cloth_fling.benchmark import report_benchmark
 
-        return report_benchmark(root)
+        report = report_benchmark(root)
+        return {**report, "stage_passed": not report["integrity_errors"]}
     if stage not in {"prepare", "qualify", "pilot"}:
         raise ValueError(f"unknown benchmark stage: {stage}")
+    if stage == "prepare" and (root / "benchmark-manifest.json").exists():
+        from cloth_fling.benchmark import load_benchmark
+
+        return load_benchmark(root)
     if stage != "prepare":
         from cloth_fling.benchmark import load_benchmark
 
@@ -756,7 +977,11 @@ def _pilot(env, root, ledger, manifest):
             if previous is not None:
                 if previous["status"] != "finished":
                     raise RuntimeError("unfinished pilot episode: preserve evidence; do not replay")
-                results.append(previous["result"])
+                prior_result = previous["result"]
+                _validate_case(
+                    root, root / prior_result["dataset"], report_ref=prior_result["report_ref"]
+                )
+                results.append(prior_result)
                 continue
             episode_token = ledger.claim_pilot(
                 fixture["fixture_id"], selector, qualification_sha256=qualification_hash
@@ -792,5 +1017,5 @@ def _pilot(env, root, ledger, manifest):
             ledger.finish_pilot(episode_token, result=result)
             results.append(result)
     report = report_benchmark(root)
-    report["stage_passed"] = report.get("heldout_gate", {}).get("passed", False)
+    report["stage_passed"] = report.get("heldout_geometry_gate", {}).get("passed", False)
     return report
