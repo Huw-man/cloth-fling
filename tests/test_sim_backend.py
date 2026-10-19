@@ -220,11 +220,13 @@ def test_renderer_warms_buffers_and_forces_same_step_refresh_without_physics(bac
     b.scene.step = forbidden_step
     state = b.snapshot()
     b.observe()
-    assert len(calls) == 2  # First draw allocates buffers; second uploads dynamic vertices.
+    assert len(calls) == 3  # Warm, dynamic RGB, then calibrated depth-only draw.
     b.observe()
-    assert len(calls) == 2  # Cached observation needs no redraw.
+    assert len(calls) == 3  # Cached observation needs no redraw.
     b.restore(state)
-    assert len(calls) == 3  # A restore at the same step forces a fresh dynamic upload.
+    assert len(calls) == 5  # Restore forces RGB and depth refresh without stepping.
+    assert [call["rgb"] for call in calls] == [True, True, False, True, False]
+    assert [call["depth"] for call in calls] == [False, False, True, False, True]
     assert all(call["force_render"] and not call["antialiasing"] for call in calls)
     assert b.snapshot()["state_hash"] == state["state_hash"]
 
