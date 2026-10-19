@@ -81,7 +81,7 @@ def _checked_capture(env, monkeypatch, *, phase, selected=None, fail=False):
     baseline = env.observe()
     cached = env._observation
     cache_arrays = (cached.rgb, cached.depth)
-    state_hash, step = env.snapshot()["state_hash"], env.scene._t
+    state_hash, step = env.snapshot()["state_hash"], env.scene.sim.cur_substep_global
     pose = env.camera.transform.copy()
     fields = {
         k: _array(getattr(env.camera, k)) for k in ("_pos", "_lookat", "_up", "_transform", "_quat")
@@ -123,7 +123,7 @@ def _checked_capture(env, monkeypatch, *, phase, selected=None, fail=False):
         np.testing.assert_array_equal(cached.rgb, baseline.rgb)
         np.testing.assert_array_equal(cached.depth, baseline.depth)
         assert env.snapshot()["state_hash"] == state_hash
-        assert env.scene._t == step
+        assert env.scene.sim.cur_substep_global == step
         if targets is None:
             assert env._targets is None
         else:
@@ -282,7 +282,7 @@ def test_schema2_folded_same_step_roundtrip(native_env, tmp_path):
     original = env.snapshot()
     before = env.observe()
     assert original["schema_version"] == 2 and original["engine_version"] == "1.4.4"
-    step = env.scene._t
+    step = env.scene.sim.cur_substep_global
     changed = copy.deepcopy(original)
     changed["positions"] = finite_radius_fold(
         original["positions"], 2 * env.config.mesh_spacing_m, env._initial_height + 0.08
@@ -302,7 +302,7 @@ def test_schema2_folded_same_step_roundtrip(native_env, tmp_path):
     np.savez_compressed(tmp_path / "schema2-roundtrip.npz", **original)
     with np.load(tmp_path / "schema2-roundtrip.npz", allow_pickle=False) as archive:
         restored = env.restore(dict(archive))
-    assert env.scene._t == step
+    assert env.scene.sim.cur_substep_global == step
     assert env.snapshot()["state_hash"] == original["state_hash"]
     np.testing.assert_array_equal(env.get_positions(), original["positions"])
     np.testing.assert_array_equal(env.get_velocities(), original["velocities"])
@@ -341,13 +341,13 @@ def test_old_physical_rejection_and_render_only_latch(native_env, tmp_path):
     with pytest.raises(ValueError, match="schema-1 Genesis 0.4.3"):
         env.restore(archival)
     assert env.snapshot()["state_hash"] == current["state_hash"]
-    step = env.scene._t
+    step = env.scene.sim.cur_substep_global
     env.restore_recorded_geometry(archival)
     assert env.capabilities["render_only"] and not env.capabilities["physical_restore"]
     np.testing.assert_array_equal(env.get_positions(), archival["positions"])
     np.testing.assert_array_equal(env.get_velocities(), 0)
     assert env._free().all() and not env.attached_ids
-    assert env.scene._t == step
+    assert env.scene.sim.cur_substep_global == step
     for operation in (
         lambda: env.step(),
         lambda: env.reset(),
