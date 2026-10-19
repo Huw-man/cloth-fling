@@ -123,6 +123,23 @@ class BudgetLedger:
     @staticmethod
     def _status(ledger):
         entries = ledger["entries"]
+        tokens = set()
+        for entry in entries:
+            reserved = entry.get("reserved_wall_seconds")
+            charged = entry.get("wall_seconds", reserved)
+            if (
+                entry.get("category") not in LIMITS
+                or entry.get("status") not in {"reserved", "finished", "abandoned"}
+                or not isinstance(reserved, (int, float))
+                or not math.isfinite(reserved)
+                or reserved <= 0
+                or not isinstance(charged, (int, float))
+                or not math.isfinite(charged)
+                or charged < 0
+                or entry["token"] in tokens
+            ):
+                raise ValueError("invalid benchmark ledger reservation")
+            tokens.add(entry["token"])
         counts = {category: sum(e["category"] == category for e in entries) for category in LIMITS}
         wall = sum(e.get("wall_seconds", e["reserved_wall_seconds"]) for e in entries)
         if wall > WALL_LIMIT or any(
@@ -135,6 +152,7 @@ class BudgetLedger:
             "remaining_wall_seconds": WALL_LIMIT - wall,
             "pending": [e for e in entries if e["status"] == "reserved"],
             "pilot_episodes": copy.deepcopy(ledger["pilot_episodes"]),
+            "entries": copy.deepcopy(entries),
         }
 
     def status(self):
@@ -535,6 +553,13 @@ def prepare_benchmark(
                             state, identity["physics_config"], coverage, pairs
                         )
                     accepted = all(checks.values())
+                    if accepted and any(
+                        a.get("accepted")
+                        and a["split"] != split
+                        and a.get("state_content_sha256") == _physical_content(state)
+                        for a in progress["attempts"]
+                    ):
+                        raise ValueError("derivative state leakage across splits")
                     attempt.update(
                         accepted=accepted,
                         checks=checks,
@@ -547,8 +572,9 @@ def prepare_benchmark(
                     )
                     if accepted and snapshot_identity is None:
                         snapshot_identity = _state_identity(state)
-                except Exception as exc:  # Every failed reset is evidence, never a flat fallback.
+                except BaseException as exc:  # Persist interruption without retrying its reset.
                     attempt["reason"] = f"{type(exc).__name__}: {exc}"
+                    attempt["interrupted"] = not isinstance(exc, Exception)
                     if state is None:
                         try:
                             with _deadline(started + allowance):
@@ -557,11 +583,13 @@ def prepare_benchmark(
                             attempt["snapshot_error"] = (
                                 f"{type(capture_error).__name__}: {capture_error}"
                             )
+                    if attempt["interrupted"]:
+                        raise
                 finally:
                     elapsed = time.monotonic() - started
                     # Timed-out calls consume the allowance; their overrun remains explicit.
                     attempt["wall_seconds"] = elapsed
-                    if elapsed > allowance:
+                    if elapsed > allowance or attempt.get("interrupted"):
                         ledger.abandon(
                             token, result={"reason": "deadline", "observed_wall_seconds": elapsed}
                         )
@@ -633,6 +661,18 @@ def load_benchmark(output_dir, *, identity=None):
     if identity is not None and identity != manifest["identity"]:
         raise ValueError("frozen benchmark configuration mismatch")
     _verify_refs(root, list(manifest["files"].values()))
+    if manifest.get("complete") != (manifest["stop_reason"] == "completed") or manifest.get(
+        "stage_passed"
+    ) != manifest.get("complete"):
+        raise ValueError("benchmark completion flags mismatch")
+    allowed_order = [("development", "fold", seed) for seed in (11, 17, 23)]
+    allowed_order += [("development", "drop", seed) for seed in range(1000, 1012)]
+    allowed_order += [("heldout", "drop", seed) for seed in range(2000, 2012)]
+    ordered = [(a["split"], a["kind"], a["seed"]) for a in manifest["attempts"]]
+    if any(item not in allowed_order for item in ordered) or len(ordered) != len(set(ordered)):
+        raise ValueError("unknown or repeated preparation seed/split")
+    if ordered != sorted(ordered, key=allowed_order.index):
+        raise ValueError("preparation split order changed")
     fixtures = manifest["fixtures"]
     if fixtures != [a for a in manifest["attempts"] if a.get("accepted")]:
         raise ValueError("fixture selection differs from preparation journal")
@@ -678,6 +718,11 @@ def load_benchmark(output_dir, *, identity=None):
             or strain != fixture["max_edge_strain"]
         ):
             raise ValueError("fixture pre-action qualification mismatch")
+        if (
+            fixture["fixture_id"] != f"{fixture['split']}-{fixture['kind']}-{fixture['seed']}"
+            or fixture["reset_group_id"] != f"{fixture['kind']}-{fixture['seed']}"
+        ):
+            raise ValueError("fixture/reset-group identity changed")
         group = fixture["reset_group_id"]
         if group in seen_groups:
             raise ValueError("duplicate reset group")
@@ -720,6 +765,31 @@ def _check_qualification(root, record, manifest):
                 raise ValueError("qualification cannot use heldout")
             ref = item["diagnostic_ref"]
             _verify_refs(root, ref)
+            diagnostic = load_json(root, ref["path"])
+            provenance = diagnostic.get("provenance")
+            if provenance is not None:
+                for key, value in manifest["identity"].items():
+                    if provenance.get(key) != value:
+                        raise ValueError(f"qualification source configuration mismatch: {key}")
+                source_hash = provenance.get("source_reset_sha256")
+                if source_hash != fixture["state_sha256"] and (
+                    source_hash is not None or record["passed"]
+                ):
+                    raise ValueError("qualification source frozen state hash mismatch")
+            if (
+                "primitive_config" in item
+                and "config" in diagnostic
+                and item["primitive_config"] != diagnostic["config"]
+            ):
+                raise ValueError("qualification evidence primitive configuration mismatch")
+            if (
+                "pixels" in item
+                and "fixed_pixels" in diagnostic
+                and _digest(item["pixels"]) != _digest(diagnostic["fixed_pixels"])
+            ):
+                raise ValueError("qualification fixed pair mismatch")
+            if "stage" in item and item["stage"] not in {"initial", "revision"}:
+                raise ValueError("unknown qualification tuning stage")
     _verify_refs(root, record)
 
 
@@ -748,3 +818,661 @@ def load_qualification(output_dir):
     record = _sealed_load(root, "benchmark-qualification.json")
     _check_qualification(root, record, manifest)
     return record
+
+
+def aggregate_episode(
+    rows, *, initial_coverage, evidence=None, end_reason=None, complete=False, max_actions=5
+):
+    """Initial+5 confirmed-settled curve with invalid terminal geometry kept separate.
+
+    ``evidence`` maps transition IDs to the existing writer evidence payload. A
+    valid action advances coverage only with an explicit settled diagnostic. Missing,
+    invalid and unconfirmed steps carry the last confirmed settled coverage forward.
+    Signed improvements are never clipped. Incomplete/failure flags remain visible.
+    """
+    if not math.isfinite(initial_coverage):
+        raise ValueError("finite initial settled coverage required")
+    if len(rows) > max_actions or [r["step_id"] for r in rows] != list(range(len(rows))):
+        raise ValueError("pilot step order/action bound violated")
+    evidence = evidence or {}
+    curve = [float(initial_coverage)]
+    observed_invalid = []
+    unconfirmed = []
+    recorded = {"attempts": 0, "wall_seconds": 0.0, "simulated_seconds": 0.0}
+    unrecorded = dict(recorded)
+    valid = 0
+    for row in rows:
+        support = evidence.get(row["transition_id"], {})
+        diagnostics = support.get("diagnostics", {})
+        recording = support.get("evidence", {}).get("recording")
+        timing = recorded if recording is not None else unrecorded
+        timing["attempts"] += 1
+        for key in ("wall_seconds", "simulated_seconds"):
+            value = row.get(key)
+            if value is not None and math.isfinite(value):
+                timing[key] += value
+        value = row.get("coverage_after")
+        finite = value is not None and math.isfinite(value)
+        if row["execution_valid"]:
+            valid += 1
+            if diagnostics.get("settled") is True and finite:
+                curve.append(float(value))
+            else:
+                curve.append(curve[-1])
+                unconfirmed.append(row["step_id"])
+        else:
+            curve.append(curve[-1])
+            observed_invalid.append(
+                {
+                    "step_id": row["step_id"],
+                    "observed_coverage": value if finite else None,
+                    "settled": diagnostics.get("settled"),
+                    "reason": row["reason"],
+                    "terminal_observation_valid": diagnostics.get("terminal_observation_valid"),
+                }
+            )
+    curve.extend([curve[-1]] * (max_actions + 1 - len(curve)))
+    final = curve[-1]
+    return {
+        "curve": curve,
+        "initial_coverage": initial_coverage,
+        "final_coverage": final,
+        "final_improvement": final - initial_coverage,
+        "success_coverage_ge_0_95": final >= 0.95,
+        "attempts": len(rows),
+        "valid_attempts": valid,
+        "invalid_attempts": len(rows) - valid,
+        "valid_attempt_fraction": valid / len(rows) if rows else None,
+        "invalid_attempt_fraction": (len(rows) - valid) / len(rows) if rows else None,
+        "no_pair": end_reason == "no_valid_pair",
+        "end_reason": end_reason,
+        "complete": bool(complete and not unconfirmed),
+        "missing": False,
+        "unconfirmed_valid_steps": unconfirmed,
+        "observed_invalid_terminal_geometry": observed_invalid,
+        "timing": {"recorded": recorded, "unrecorded": unrecorded},
+    }
+
+
+def _pilot_binding(dataset, episode):
+    run = next(r for r in dataset["runs"] if r["run_id"] == episode["run_id"])
+    episode_meta = episode.get("metadata", {})
+    run_meta = run["metadata"]
+    binding = episode_meta.get("benchmark") or run_meta.get("episode_metadata", {}).get("benchmark")
+    # Also accept the original documented direct-run convention for older local callers.
+    binding = binding or run_meta.get("benchmark")
+    if not isinstance(binding, dict):
+        raise ValueError("pilot dataset is missing benchmark identity metadata")
+    initial_settled = episode_meta.get("initial_settled")
+    if initial_settled is None:
+        initial_settled = run_meta.get("episode_metadata", {}).get("initial_settled")
+    return binding, run_meta, initial_settled
+
+
+def _read_pilot_episode(root, dataset_root, dataset, episode, rows, manifest, qualification):
+    binding, run_meta, initial_settled = _pilot_binding(dataset, episode)
+    fixture = _fixture(manifest, binding["fixture_id"])
+    selector = binding["selector"]
+    if fixture["kind"] != "drop" or selector not in SELECTORS:
+        raise ValueError("pilot dataset has an undeclared fixture/selector")
+    if binding["manifest_sha256"] != file_sha256(root / MANIFEST):
+        raise ValueError("pilot frozen manifest mismatch")
+    if qualification is None or binding["qualification_sha256"] != _digest(qualification):
+        raise ValueError("pilot frozen qualification mismatch")
+    if not qualification["passed"]:
+        raise ValueError("pilot cannot follow failed qualification")
+    for key in ("split", "reset_group_id", "cloth_id"):
+        if episode[key] != fixture[key]:
+            raise ValueError(f"pilot {key} differs from frozen reset")
+    reset = read_bundle(dataset_root, episode["reset"]["path"])
+    source = reset.get("reset_source")
+    if source is None or _digest(source) != fixture["state_sha256"]:
+        raise ValueError("pilot is not restored from exact paired frozen state")
+    observed_reset = reset.get("state")
+    if observed_reset is not None and not episode.get("reset_error"):
+        _validate_state(observed_reset, manifest["identity"], manifest["snapshot_identity"])
+        if _physical_content(observed_reset) != fixture["state_content_sha256"]:
+            raise ValueError("observed pilot reset differs from exact frozen state")
+    elif not episode.get("reset_error"):
+        raise ValueError("observed pilot reset state missing")
+    if reset["config"] != manifest["identity"]["physics_config"]:
+        raise ValueError("pilot physics configuration changed")
+    provenance = run_meta.get("configuration_provenance", {})
+    for key, value in manifest["identity"].items():
+        if provenance.get(key) != value:
+            raise ValueError(f"pilot frozen configuration changed: {key}")
+    # Pilot uses the qualified laydown configuration; settings cannot be retuned on heldout.
+    if run_meta.get("primitive_config") != qualification["primitive_config"]["laydown"]:
+        raise ValueError("pilot primitive configuration changed after qualification")
+    if (
+        "selection_config" in run_meta
+        and run_meta["selection_config"] != qualification["selection_config"]
+    ):
+        raise ValueError("pilot selector configuration changed after qualification")
+    if (
+        "selector_config" in run_meta
+        and run_meta["selector_config"] != qualification["selection_config"]
+    ):
+        raise ValueError("pilot selector configuration changed after qualification")
+    if rows and initial_settled is not True:
+        raise ValueError("pilot initial settled confirmation missing")
+    if rows and (
+        rows[0].get("coverage_before") is None
+        or not math.isclose(
+            rows[0]["coverage_before"], fixture["coverage"], rel_tol=0, abs_tol=1e-8
+        )
+    ):
+        raise ValueError("pilot initial coverage differs from frozen state")
+    for row in rows:
+        allowed_policies = {selector}
+        if selector == "geometry_guided":
+            allowed_policies.add("geometry_guided_privileged_depth")
+        if row["policy"] not in allowed_policies or row["primitive"] != "laydown":
+            raise ValueError("pilot transition selector/primitive differs from frozen protocol")
+    support = {r["transition_id"]: read_bundle(dataset_root, r["evidence_path"]) for r in rows}
+    complete = episode["status"] == "closed" and episode["end_reason"] in {
+        "max_actions",
+        "no_valid_pair",
+        "execution_invalid",
+        "environment_terminated",
+        "settled_coverage_threshold",
+        "initially_unfolded",
+    }
+    if episode.get("reset_error") or episode["end_reason"] in {
+        "interrupted",
+        "max_wall_seconds",
+        "reset_failed",
+        "reset_timeout",
+        "selection_error",
+        "selection_timeout",
+    }:
+        complete = False
+    result = aggregate_episode(
+        rows,
+        initial_coverage=fixture["coverage"],
+        evidence=support,
+        end_reason=episode["end_reason"],
+        complete=complete,
+    )
+    result.update(
+        fixture_id=fixture["fixture_id"],
+        selector=selector,
+        split=fixture["split"],
+        reset_group_id=fixture["reset_group_id"],
+        dataset=dataset_root.relative_to(root).as_posix(),
+        episode_id=episode["episode_id"],
+        state_content_sha256=fixture["state_content_sha256"],
+    )
+    result["rgb"] = []
+    for label, observation in (
+        ("initial", episode.get("initial_observation")),
+        ("terminal", episode.get("last_observation")),
+    ):
+        if observation:
+            ref = observation["rgb"]["path"]
+            result["rgb"].append(
+                {
+                    "label": label,
+                    "relative_file": relative_path(dataset_root, ref).relative_to(root).as_posix(),
+                }
+            )
+    videos = []
+
+    def find_videos(value):
+        if isinstance(value, dict):
+            reference = value.get("relative_file")
+            if isinstance(reference, str) and Path(reference).suffix.lower() in {".mp4", ".webm"}:
+                path = relative_path(dataset_root, reference)
+                if not path.is_file():
+                    raise ValueError(f"missing native recording: {reference}")
+                if value.get("sha256") and file_sha256(path) != value["sha256"]:
+                    raise ValueError("native recording hash mismatch")
+                videos.append(path.relative_to(root).as_posix())
+            for child in value.values():
+                find_videos(child)
+        elif isinstance(value, list):
+            for child in value:
+                find_videos(child)
+
+    for item in support.values():
+        find_videos(item.get("evidence", {}).get("recording", {}))
+    result["native_videos"] = sorted(set(videos))
+    return result
+
+
+def _summarize_selector(episodes):
+    n = len(episodes)
+    attempts = sum(e["attempts"] for e in episodes)
+    valid = sum(e["valid_attempts"] for e in episodes)
+    observed = sum(not e["missing"] for e in episodes)
+    return {
+        "groups": n,
+        "observed_episodes": observed,
+        "curve_status": "observed_with_missing_baselines"
+        if observed and observed < n
+        else "observed"
+        if observed
+        else "not_evaluated",
+        "complete_episodes": sum(e["complete"] for e in episodes),
+        "mean_initial_coverage": sum(e["initial_coverage"] for e in episodes) / n if n else None,
+        "mean_final_coverage": sum(e["final_coverage"] for e in episodes) / n
+        if n and observed
+        else None,
+        "mean_final_improvement": sum(e["final_improvement"] for e in episodes) / n
+        if n and observed
+        else None,
+        "positive_final_improvement_groups": sum(e["final_improvement"] > 0 for e in episodes),
+        "success_fraction_coverage_ge_0_95": sum(e["success_coverage_ge_0_95"] for e in episodes)
+        / n
+        if n
+        else None,
+        "attempts": attempts,
+        "valid_attempts": valid,
+        "invalid_attempts": attempts - valid,
+        "valid_attempt_fraction": valid / attempts if attempts else None,
+        "invalid_attempt_fraction": (attempts - valid) / attempts if attempts else None,
+        "no_pair_episodes": sum(e["no_pair"] for e in episodes),
+        "no_pair_episode_fraction": sum(e["no_pair"] for e in episodes) / n
+        if n and observed
+        else None,
+        "mean_curve": [
+            sum(e["curve"][i] if e["curve"] else e["initial_coverage"] for e in episodes) / n
+            for i in range(6)
+        ]
+        if n and observed
+        else [],
+        "timing": {
+            mode: {
+                key: sum(e["timing"][mode][key] for e in episodes)
+                for key in ("attempts", "wall_seconds", "simulated_seconds")
+            }
+            for mode in ("recorded", "unrecorded")
+        },
+    }
+
+
+def report_benchmark(output_dir):
+    """Write a compact offline JSON/HTML review, keeping missing/failure denominators.
+
+    Reads only the existing transition schema, metadata and referenced artifacts.
+    Does not import Genesis/Torch, restore a state, or execute/tune a selector.
+    """
+    from .data import read_transitions, verify_dataset
+
+    root = Path(output_dir).resolve()
+    manifest = load_benchmark(root)
+    qualification = (
+        load_qualification(root) if (root / "benchmark-qualification.json").exists() else None
+    )
+    by_pair = {}
+    integrity_errors = []
+    pilot_root = root / "pilot"
+    paths = sorted(pilot_root.rglob("manifest.json")) if pilot_root.exists() else []
+    for path in paths:
+        if not path.resolve().is_relative_to(root):
+            raise ValueError("pilot path escapes benchmark root")
+        directory = path.parent
+        dataset = load_json(directory, "manifest.json")
+        verification = verify_dataset(directory)
+        # Structural failures are retained as incomplete report evidence; content mismatches
+        # and identity tampering are always rejected instead of silently dropping the run.
+        fatal = [
+            e
+            for e in verification["errors"]
+            if "unfinished" not in e
+            and "still open" not in e
+            and "in-flight" not in e
+            and "terminal reason" not in e
+            and "terminal/truncation" not in e
+        ]
+        if fatal:
+            raise ValueError("pilot dataset integrity: " + "; ".join(fatal))
+        integrity_errors.extend(
+            f"{directory.relative_to(root)}: {e}" for e in verification["errors"]
+        )
+        rows = read_transitions(directory).to_pylist()
+        if not dataset["episodes"]:
+            integrity_errors.append(f"{directory.relative_to(root)}: dataset has no episode")
+        for episode in dataset["episodes"]:
+            selected = [r for r in rows if r["episode_id"] == episode["episode_id"]]
+            result = _read_pilot_episode(
+                root, directory, dataset, episode, selected, manifest, qualification
+            )
+            pair = (result["fixture_id"], result["selector"])
+            if pair in by_pair:
+                raise ValueError("duplicate/rerun pilot fixture-selector episode")
+            by_pair[pair] = result
+    ledger = BudgetLedger(root).status()
+    claims = {(e["fixture_id"], e["selector"]): e for e in ledger["pilot_episodes"]}
+    episodes = []
+    for fixture in manifest["fixtures"]:
+        if fixture["kind"] != "drop":
+            continue
+        for selector in SELECTORS:
+            pair = (fixture["fixture_id"], selector)
+            if pair in by_pair:
+                result = by_pair[pair]
+                if pair not in claims:
+                    integrity_errors.append(f"{pair}: missing durable pilot episode claim")
+                    result["complete"] = False
+                elif claims[pair]["status"] != "finished":
+                    result["complete"] = False
+                result["ledger_claim"] = claims.get(pair)
+                if pair in claims:
+                    claim = claims[pair]
+                    if (
+                        claim["qualification_sha256"] != _digest(qualification)
+                        or claim["state_content_sha256"] != fixture["state_content_sha256"]
+                    ):
+                        raise ValueError("pilot ledger frozen identity mismatch")
+                    reservations = [
+                        entry
+                        for entry in ledger["entries"]
+                        if entry["category"] == "pilot"
+                        and entry["metadata"].get("episode_token") == claim["token"]
+                    ]
+                    if len(reservations) != result["attempts"]:
+                        integrity_errors.append(f"{pair}: dataset/reserved action count mismatch")
+                        result["complete"] = False
+            else:
+                result = aggregate_episode([], initial_coverage=fixture["coverage"])
+                result.update(
+                    fixture_id=fixture["fixture_id"],
+                    selector=selector,
+                    split=fixture["split"],
+                    reset_group_id=fixture["reset_group_id"],
+                    missing=True,
+                    curve=[],
+                    curve_status="missing_episode",
+                    end_reason="missing_episode",
+                    rgb=[],
+                    native_videos=[],
+                    ledger_claim=claims.get(pair),
+                )
+            episodes.append(result)
+    splits = {}
+    for split in ("development", "heldout"):
+        summaries = {
+            selector: _summarize_selector(
+                [e for e in episodes if e["split"] == split and e["selector"] == selector]
+            )
+            for selector in SELECTORS
+        }
+        differences = []
+        for fixture in manifest["fixtures"]:
+            if fixture["kind"] != "drop" or fixture["split"] != split:
+                continue
+            paired = [
+                next(
+                    e
+                    for e in episodes
+                    if e["fixture_id"] == fixture["fixture_id"] and e["selector"] == selector
+                )
+                for selector in SELECTORS
+            ]
+            differences.append(
+                {
+                    "fixture_id": fixture["fixture_id"],
+                    "geometry_minus_uniform_final_coverage": (
+                        paired[1]["final_coverage"] - paired[0]["final_coverage"]
+                    )
+                    if all(not e["missing"] for e in paired)
+                    else None,
+                    "both_complete": all(e["complete"] for e in paired),
+                    "both_observed": all(not e["missing"] for e in paired),
+                }
+            )
+        summaries["paired_differences"] = differences
+        summaries["mean_paired_final_difference"] = (
+            sum(
+                p["geometry_minus_uniform_final_coverage"]
+                for p in differences
+                if p["geometry_minus_uniform_final_coverage"] is not None
+            )
+            / sum(p["geometry_minus_uniform_final_coverage"] is not None for p in differences)
+            if any(p["geometry_minus_uniform_final_coverage"] is not None for p in differences)
+            else None
+        )
+        splits[split] = summaries
+    geometry = splits["heldout"]["geometry_guided"]
+    heldout_all = [e for e in episodes if e["split"] == "heldout"]
+    gate_checks = {
+        "six_heldout_groups": geometry["groups"] == 6,
+        "all_paired_episodes_complete": len(heldout_all) == 12
+        and all(e["complete"] for e in heldout_all),
+        "mean_final_improvement_ge_0_10": geometry["mean_final_improvement"] is not None
+        and geometry["mean_final_improvement"] >= 0.10 - 1e-12,
+        "positive_improvement_ge_4_of_6": geometry["positive_final_improvement_groups"] >= 4,
+        "valid_attempt_fraction_ge_0_80": geometry["valid_attempt_fraction"] is not None
+        and geometry["valid_attempt_fraction"] >= 0.80,
+        "evidence_integrity": not integrity_errors and not ledger["pending"],
+        "fixture_preparation_passed": manifest["stage_passed"],
+        "qualification_passed": bool(qualification and qualification["passed"]),
+    }
+    heldout_evaluated = any(not e["missing"] for e in heldout_all)
+    pilot_evaluated = any(not e["missing"] for e in episodes)
+    if not heldout_evaluated:
+        for key in (
+            "mean_final_improvement_ge_0_10",
+            "positive_improvement_ge_4_of_6",
+            "valid_attempt_fraction_ge_0_80",
+        ):
+            gate_checks[key] = None
+    gate_status = (
+        "not_evaluated"
+        if not heldout_evaluated
+        else "incomplete"
+        if not gate_checks["all_paired_episodes_complete"]
+        else "passed"
+        if all(gate_checks.values())
+        else "not_passed"
+    )
+    preparation = {
+        "stop_reason": manifest["stop_reason"],
+        "complete": manifest["complete"],
+        "stage_passed": manifest["stage_passed"],
+        "counts": {},
+        "attempts": [],
+    }
+    for split in ("development", "heldout"):
+        for kind in ("fold", "drop"):
+            attempts = [
+                a for a in manifest["attempts"] if a["split"] == split and a["kind"] == kind
+            ]
+            if attempts or kind == "drop":
+                accepted = sum(a.get("accepted", False) for a in attempts)
+                preparation["counts"][f"{split}_{kind}"] = {
+                    "attempted": len(attempts),
+                    "accepted": accepted,
+                    "rejected": len(attempts) - accepted,
+                    "required": 3 if kind == "fold" else 6,
+                }
+    for attempt in manifest["attempts"]:
+        item = copy.deepcopy(attempt)
+        item["failed_checks"] = [k for k, value in attempt.get("checks", {}).items() if not value]
+        if attempt.get("state"):
+            document = load_json(root, attempt["state"]["path"])
+            item["state_arrays"] = document.get("arrays")
+        preparation["attempts"].append(item)
+    report = {
+        "schema_version": 1,
+        "simulation_only": True,
+        "preparation": preparation,
+        "stages": {
+            "prepare": manifest["stop_reason"],
+            "qualify": "not_evaluated"
+            if qualification is None
+            else "passed"
+            if qualification["passed"]
+            else "not_passed",
+            "pilot": "not_evaluated"
+            if not pilot_evaluated
+            else "complete"
+            if all(e["complete"] for e in episodes)
+            else "incomplete",
+            "heldout": gate_status,
+        },
+        "manifest_sha256": file_sha256(root / MANIFEST),
+        "qualification_sha256": _digest(qualification) if qualification is not None else None,
+        "scope": manifest["scope"],
+        "selectors": {
+            "uniform_valid": "visible feasible RGB candidates; privileged depth feasibility",
+            "geometry_guided": "geometry-guided privileged-depth-assisted baseline",
+        },
+        "curve_definition": "initial+5; only explicitly confirmed settled valid terminal coverage advances; invalid/missing steps carry last confirmed settled coverage; negative gains retained",
+        "success_definition": "final confirmed settled coverage >= 0.95; fraction includes missing/failure groups",
+        "episodes": episodes,
+        "splits": splits,
+        "budget": ledger,
+        "integrity_errors": integrity_errors,
+        "heldout_geometry_gate": {
+            "passed": all(gate_checks.values()) if heldout_evaluated else None,
+            "evaluated": heldout_evaluated,
+            "status": gate_status,
+            "checks": gate_checks,
+        },
+    }
+    atomic_write(root, "benchmark-report.json", json_bytes(report))
+    atomic_write(root, "index.html", _review_html(report).encode())
+    return report
+
+
+def _review_html(report):
+    from html import escape
+    from urllib.parse import quote
+
+    def esc(value):
+        return escape(str(value), quote=True)
+
+    def number(value):
+        return f"{value:.3f}" if isinstance(value, (int, float)) and math.isfinite(value) else "—"
+
+    chunks = [
+        "<!doctype html><html lang='en'><meta charset='utf-8'>",
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>",
+        "<title>Cloth-fling milestone 3 review</title>",
+        "<style>body{font:16px system-ui;max-width:1050px;margin:2rem auto;padding:0 1rem;background:#fafafa;color:#18232c}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{text-align:left;padding:.5rem;border-bottom:1px solid #ccd4dc}figure{margin:1rem 0;padding:1rem;background:white;border:1px solid #ddd}img{max-width:220px}svg{max-width:100%;height:auto}.status{font-weight:bold}small{display:block}a{color:#174d9d}</style>",
+        "<h1>Milestone 3 offline review</h1>",
+        f"<p>{esc(report['scope'])}</p>",
+        f"<p class='status'>Heldout geometry gate: {esc(report['heldout_geometry_gate']['status'].replace('_', ' ').upper())}</p>",
+        "<p>Local simulation-only assisted attachment evidence. Geometry-guided selection uses privileged depth. Native recordings show grasp spheres when supplied by the coordinator recorder.</p>",
+        f"<p>{esc(report['curve_definition'])}</p>",
+        f"<p>{esc(report['success_definition'])}</p>",
+    ]
+    chunks.append(
+        f"<h2>Reset preparation</h2><p class='status'>{esc(report['preparation']['stop_reason'])}. Qualification: {esc(report['stages']['qualify'])}; pilot: {esc(report['stages']['pilot'])}. Reset preparation limits do not establish failed action behavior.</p>"
+    )
+    chunks.append(
+        "<table><tr><th>Pool</th><th>Attempts</th><th>Accepted / required</th><th>Rejected</th></tr>"
+    )
+    for pool, values in report["preparation"]["counts"].items():
+        chunks.append(
+            f"<tr><td>{esc(pool)}</td><td>{values['attempted']}</td><td>{values['accepted']} / {values['required']}</td><td>{values['rejected']}</td></tr>"
+        )
+    chunks.append(
+        "</table><details open><summary>Every reset preparation and rejection</summary><table><tr><th>Fixture / split</th><th>Status</th><th>Coverage</th><th>Reason / failed pre-action checks</th><th>Saved state</th></tr>"
+    )
+    for attempt in report["preparation"]["attempts"]:
+        links = []
+        for label, ref in (("JSON", attempt.get("state")), ("NPZ", attempt.get("state_arrays"))):
+            if ref:
+                links.append(f"<a href='{esc(quote(ref['path'], safe='/'))}'>{label}</a>")
+        reason = str(attempt.get("reason", ""))
+        if attempt["failed_checks"]:
+            reason += ": " + ", ".join(attempt["failed_checks"])
+        chunks.append(
+            f"<tr><td>{esc(attempt['fixture_id'])}</td><td>{esc(attempt['status'])}</td><td>{number(attempt.get('coverage'))}</td><td>{esc(reason)}</td><td>{' / '.join(links) if links else 'Snapshot unavailable'}</td></tr>"
+        )
+    chunks.append(
+        "</table></details><p>Accepted and rejected state bundles are privileged execution/evaluation artifacts. They are not learned RGB observations.</p>"
+    )
+    for split, summaries in report["splits"].items():
+        chunks.append(
+            f"<h2>{esc(split)}</h2><table><tr><th>Selector</th><th>Complete/groups</th><th>Final coverage</th><th>Gain</th><th>Success fraction</th><th>Invalid attempts</th><th>No pair</th></tr>"
+        )
+        for selector in SELECTORS:
+            s = summaries[selector]
+            chunks.append(
+                f"<tr><td>{esc(selector)}</td><td>{s['complete_episodes']}/{s['groups']}</td><td>{number(s['mean_final_coverage'])}</td><td>{number(s['mean_final_improvement'])}</td><td>{number(s['success_fraction_coverage_ge_0_95'])}</td><td>{number(s['invalid_attempt_fraction'])}</td><td>{number(s['no_pair_episode_fraction'])}</td></tr>"
+            )
+        chunks.append(
+            "</table><svg viewBox='0 0 640 270' role='img' aria-label='Mean confirmed settled coverage versus action'>"
+        )
+        chunks.append("<rect width='640' height='270' fill='white'/>")
+        for y in (0, 0.25, 0.5, 0.75, 1):
+            py = 225 - y * 180
+            chunks.append(
+                f"<path d='M50 {py}H610' stroke='#ddd'/><text x='8' y='{py + 5}' font-size='13'>{y:.2f}</text>"
+            )
+        for i in range(6):
+            chunks.append(f"<text x='{50 + i * 112}' y='248' font-size='13'>{i}</text>")
+        chunks.append("<text x='265' y='266' font-size='13'>Action number</text>")
+        for selector, color in zip(SELECTORS, ("#3369b2", "#b44524"), strict=True):
+            curve = summaries[selector]["mean_curve"]
+            points = " ".join(
+                f"{50 + i * 112},{225 - value * 180}" for i, value in enumerate(curve)
+            )
+            chunks.append(
+                f"<polyline fill='none' stroke='{color}' stroke-width='3' points='{points}'/>"
+            )
+        chunks.append("</svg><p>Blue: uniform_valid. Orange: geometry_guided.</p>")
+        if not any(summaries[selector]["observed_episodes"] for selector in SELECTORS):
+            chunks.append(
+                "<p class='status'>NOT EVALUATED: no pilot episodes. Curves are missing; frozen reset coverage is preparation evidence only.</p>"
+            )
+        chunks.append(
+            f"<p>Mean paired final coverage difference (geometry − uniform): {number(summaries['mean_paired_final_difference'])}</p>"
+        )
+    chunks.append("<h2>Representative episodes</h2>")
+    categories = (
+        ("Success", lambda e: e["success_coverage_ge_0_95"] and not e["missing"]),
+        ("Negative gain", lambda e: e["final_improvement"] < 0),
+        ("Invalid terminal", lambda e: bool(e["observed_invalid_terminal_geometry"])),
+        ("Missing or incomplete", lambda e: e["missing"] or not e["complete"]),
+    )
+    for label, predicate in categories:
+        episode = next((e for e in report["episodes"] if predicate(e)), None)
+        chunks.append(f"<h3>{esc(label)}</h3>")
+        if episode is None:
+            chunks.append("<p>No observed example in these artifacts.</p>")
+            continue
+        chunks.append(
+            f"<figure><figcaption>{esc(episode['fixture_id'])} / {esc(episode['selector'])}: final {number(episode['final_coverage'])}, gain {number(episode['final_improvement'])}; {esc(episode['end_reason'])}</figcaption>"
+        )
+        for rgb in episode.get("rgb", []):
+            chunks.append(
+                f"<img src='{esc(quote(rgb['relative_file'], safe='/'))}' alt='{esc(rgb['label'])} RGB'>"
+            )
+        for reference in episode.get("native_videos", []):
+            chunks.append(
+                f"<p><a href='{esc(quote(reference, safe='/'))}'>Native recording with grasp spheres: {esc(Path(reference).name)}</a></p>"
+            )
+        if episode["observed_invalid_terminal_geometry"]:
+            chunks.append(
+                f"<pre>{esc(json.dumps(episode['observed_invalid_terminal_geometry'], indent=2))}</pre>"
+            )
+        chunks.append("</figure>")
+    chunks.append(
+        "<h2>Timing by recording mode</h2><table><tr><th>Split / selector / capture</th><th>Attempts</th><th>Execution wall s</th><th>Simulated s</th></tr>"
+    )
+    for split, summaries in report["splits"].items():
+        for selector in SELECTORS:
+            for mode, values in summaries[selector]["timing"].items():
+                chunks.append(
+                    f"<tr><td>{esc(split)} / {esc(selector)} / {esc(mode)}</td><td>{values['attempts']}</td><td>{number(values['wall_seconds'])}</td><td>{number(values['simulated_seconds'])}</td></tr>"
+                )
+    chunks.append(
+        "</table><p>Transition execution timings exclude reset/restore/selection and persistence overhead; the durable ledger separately charges whole simulator operation wall time.</p>"
+    )
+    chunks.append("<h2>Gate checks</h2><ul>")
+    for key, passed in report["heldout_geometry_gate"]["checks"].items():
+        chunks.append(f"<li>{esc(key)}: {esc('NOT EVALUATED' if passed is None else passed)}</li>")
+    chunks.append("</ul>")
+    if report["integrity_errors"]:
+        chunks.append(
+            "<h2>Incomplete evidence</h2><ul>"
+            + "".join(f"<li>{esc(e)}</li>" for e in report["integrity_errors"])
+            + "</ul>"
+        )
+    chunks.append("<p><a href='benchmark-report.json'>Full report and every episode</a></p></html>")
+    return "\n".join(chunks)

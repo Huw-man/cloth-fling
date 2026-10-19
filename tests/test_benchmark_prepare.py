@@ -134,8 +134,10 @@ def test_manifest_tamper_rejected(tmp_path):
 
 
 def test_identical_derivative_state_cannot_cross_splits(tmp_path):
-    with pytest.raises(ValueError, match="leakage"):
-        prepare(tmp_path, FixtureEnv(duplicate=True))
+    manifest = prepare(tmp_path, FixtureEnv(duplicate=True))
+    assert manifest["stop_reason"] == "pool_limitation"
+    assert not any(f["split"] == "heldout" for f in manifest["fixtures"])
+    assert all("leakage" in a["reason"] for a in manifest["attempts"] if a["split"] == "heldout")
 
 
 def test_durable_budget_interruption_and_limits(tmp_path):
@@ -163,3 +165,72 @@ def test_native_v2_required():
     env.config = SceneConfig()
     with pytest.raises(ValueError, match="native-v2"):
         benchmark_identity(env)
+
+
+def test_interrupted_preparation_does_not_retry_uncertain_reset(tmp_path):
+    env = FixtureEnv()
+
+    class InterruptedEnv(FixtureEnv):
+        def reset(self, seed=0, *, kind="drop"):
+            if seed == 1000:
+                raise KeyboardInterrupt("synthetic interruption")
+            return super().reset(seed, kind=kind)
+
+    with pytest.raises(KeyboardInterrupt):
+        prepare(tmp_path, InterruptedEnv())
+    manifest = prepare(tmp_path, env)
+    assert ("drop", 1000) not in env.calls
+    interrupted = next(a for a in manifest["attempts"] if a["seed"] == 1000)
+    assert not interrupted["accepted"]
+    assert manifest["complete"]
+    assert BudgetLedger(tmp_path).status()["counts"]["prepare_drop"] == 13
+
+
+def test_preparation_nonfinite_failure_snapshot_stays_safe(tmp_path):
+    class NonfiniteEnv(FixtureEnv):
+        def snapshot(self):
+            state = super().snapshot()
+            if self.seed == 1000:
+                state["positions"][0, 0] = np.nan
+                state["state_hash"] = _native_state_hash(state)
+            return state
+
+    manifest = prepare(tmp_path, NonfiniteEnv())
+    rejected = next(a for a in manifest["attempts"] if a["seed"] == 1000)
+    assert not rejected["accepted"] and rejected["state"]
+    assert manifest["complete"]
+
+
+def test_six_hour_budget_is_cumulative_even_after_reopen(tmp_path):
+    ledger = BudgetLedger(tmp_path)
+    token = ledger.reserve("simulator", wall_seconds=21599)
+    ledger.finish(token, wall_seconds=21599)
+    reopened = BudgetLedger(tmp_path)
+    with pytest.raises(RuntimeError, match="cumulative"):
+        reopened.reserve("simulator", wall_seconds=2)
+    token = reopened.reserve("simulator", wall_seconds=1)
+    reopened.abandon(token)
+    assert reopened.status()["remaining_wall_seconds"] == 0
+
+
+def test_explicit_diagnostic_cap_and_drop_cap(tmp_path):
+    ledger = BudgetLedger(tmp_path)
+    for category, count in (
+        ("diagnostic_laydown", 26),
+        ("diagnostic_fling", 6),
+        ("diagnostic_continuity", 8),
+        ("prepare_drop", 24),
+    ):
+        for _ in range(count):
+            token = ledger.reserve(category, wall_seconds=1)
+            ledger.finish(token, wall_seconds=0)
+        with pytest.raises(RuntimeError, match="attempt budget"):
+            ledger.reserve(category, wall_seconds=1)
+    status = ledger.status()
+    assert (
+        sum(
+            status["counts"][k]
+            for k in ("diagnostic_laydown", "diagnostic_fling", "diagnostic_continuity")
+        )
+        == 40
+    )
