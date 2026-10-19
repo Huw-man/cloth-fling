@@ -1,264 +1,106 @@
-# Stage 0 Genesis runtime
+# Genesis runtime and simulation boundary
 
-Stage 0 owns the scene/mesh/coverage only. All attachments are explicit assistance,
-one particle per grasp. Runtime function is not contact-grasp or primitive quality
-evidence. No robot, training, cloud compute, or publication is involved.
+The installed simulator is Genesis 0.4.3, pinned with CUDA 12.8 Torch in `uv.lock`.
+The planning source revision is recorded in `milestone.md`; packaged APIs were checked
+again during implementation. Importing backend/data/policy-support modules does not
+initialize Genesis or Torch. GPU construction explicitly requests CUDA and rejects a
+silent CPU fallback. Host validation targets the RTX 5080, 16 GB, driver 595.91.07.
 
-## Integration interface
+## Scene and physical assumptions
 
-`GenesisBackend(config, backend="gpu", headless=True)` lazily imports Genesis.
-Importing backend/mesh/coverage initializes neither Genesis nor torch. Explicit
-CUDA selection rejects silent CPU fallback. The backend alone calls scene.step;
-consumers call `set_attachment_targets` then `step`. Four solver substeps use the
-velocity `(target-current)/sim_dt`; unattached particle state is never commanded
-outside reset/restore. A target is for the next step; subsequent steps hold it.
-Release flips the free flag without zeroing velocity. GJK rigid collision mode is
-enabled because the PBD substep is 0.5 ms (outer dt 2 ms). `attached_ids` is an ordered
-tuple. `close()` destroys this scene, not the shared process-global Genesis runtime.
+One 0.50 m square cloth, a 1.20 m fixed table, and two deterministic assisted grasp points.
+World units are metres, z up. There are no arms, IK, fingers, pinch, or grasp-contact claims.
+The synthetic cloth has areal density 0.30 kg/m2, no air drag, stretch compliance 1e-7,
+bending compliance 1e-5, and static/kinetic friction coefficients 0.15/0.15. This material
+is not calibrated to a particular physical towel.
 
-Extra arrays: `rest_positions` (N,3), `faces` (F,3), `edges` (E,2), and
-`rest_edge_lengths` (E,) use Genesis's runtime particle order. Snapshot contains
-positions, velocities, free flags, topology, rest positions, scene/config hashes,
-schema version, calibration JSON, simulated time, and an integrity hash. Values
-are strings, scalars, or non-object arrays, compatible with NPZ allow_pickle=False.
-Restore validates everything before writes, restores position/velocity/time,
-rejects saved free flags containing any attached particles, clears ALL current
-attachment flags and pending targets, and checks device readback. Static table
-and material/rest constraints are defined by scene identity;
-this is not an arbitrary Genesis checkpoint or a cross-version restart format.
-`reset_metadata` is a JSON dictionary, also saved as `reset_metadata_json`, that
-records preparation kind, seed, actual target/profile and acceptance/failure.
+Outer physics dt is 2 ms with four substeps. `max_stretch_solver_iterations` is explicit;
+the current configuration uses 64. Bounded frozen-state lift checks showed substantial
+iteration sensitivity, so Genesis's default four sweeps were inadequate for this slice.
+More iterations alone do not establish physical fidelity or convergence of every phase.
 
-Genesis 0.4.3 unconditionally isotropically remeshes PBD cloth using
-`PBDOptions.particle_size` as target edge length as well as collision diameter.
-We set it to `config.mesh_spacing_m`. The original 51x51/5000-face square becomes
-2654 runtime particles and 5106 faces in the tested environment. The backend
-adopts that runtime ordering/topology and verifies bounds, planar rest shape,
-and 0.25 m2 surface area. It does not assume OBJ vertex IDs survive loading.
+**Table contact is an explicit adaptation.** Genesis 0.4.3's legacy PBD/rigid coupling
+resolves normal contact without tangential friction. `sim/contact.py` adds a Coulomb
+velocity projection after each outer step, controlled by `table_friction` in SceneConfig.
+It applies only to free particles at the finite table's support height that are not
+separating. Sliding speed decreases by at most mu_k * g * dt; static friction arrests
+small tangential speed. It changes no positions, normal velocities, airborne particles,
+attached particles, or particles beyond the table. Tests check dissipation, localization,
+dt scaling and zero-friction identity. This uses a resting-load mg approximation, not
+measured normal impact impulses or load redistribution through stacked cloth layers.
+It must be evaluated independently before a hardware-transfer claim.
 
-## Calibration agreement for Stage 1
+The backend alone owns stepping. Motion commands affect only attached particles;
+the separately declared contact physics may dissipate supported free-particle velocity.
+Release removes attachment without zeroing momentum. No global damping was tuned.
 
-The actual rasterizer is **perspective**, overhead at world (0,0,1.8), looking
-down -z, with image right +x and image down -y. Observation.calibration has:
+## Geometry, grasps and observations
 
-- `model="perspective"`
-- `intrinsics`: JSON 3x3 matrix K from Genesis camera
-- `camera_to_world`: JSON 4x4 matrix using OpenCV camera axes right/down/forward
-- `image_size=[width,height]`
-- `pixel_center_offset=0.5`
-- `depth_units="metres"`, `depth_convention="positive_camera_z"`, `world_up="+z"`
+Genesis isotropically remeshes PBD cloth. In the tested environment the requested 51x51
+input grid becomes 2654 particles and 5106 triangles. Runtime ordering, faces, rest edges
+and hashes are preserved rather than assuming input OBJ vertex IDs survive loading.
 
-Integer array sample [v,u] backprojects as
-`q = depth[v,u] * inv(K) @ [u+0.5, v+0.5, 1]`, then
-`world = camera_to_world @ [q.x,q.y,q.z,1]`. To project a world point, invert
-camera_to_world, apply K, divide by positive camera z, subtract 0.5.
-There are no orthographic bounds. Stage 0 ray-tests the first cloth surface;
-eligible picks are visible vertices of that triangle within 1.5 mesh spacings,
-with Euclidean distance then particle ID tie-breaking. A nearer hidden layer
-cannot win. Misses, coincident IDs, workspace and separation violations reject
-before any attachment mutation.
+Grasp pixels ray-test the first cloth surface. Eligible particles are visible vertices
+of that triangle within 1.5 mesh spacings, ordered by distance then particle ID. Hidden
+layers, coincident IDs, misses, unsafe separation and workspace violations reject before
+attachment. Selection erodes RGB foreground by a full 3x3 neighborhood and reserves a
+mesh-snap margin. Geometry is privileged execution/baseline support, never learned input.
 
-The table is neutral dark gray (0.04,0.04,0.04); the cloth is saturated orange
-(0.85,0.25,0.12). Use an RGB chroma test as well as brightness, as measured below.
+The overhead camera is perspective at (0,0,1.8). Calibration saves intrinsics K,
+camera_to_world with OpenCV axes, image_size, pixel_center_offset=0.5, positive optical-z
+depth in metres, and world_up=+z. Pixel [v,u] unprojects with
+`depth[v,u] * inv(K) @ [u+0.5,v+0.5,1]`, then transforms into world coordinates.
 
-Coverage is a boolean union of projected triangles on fixed 2.5 mm world cell
-centres over the table, including overlap once and preserving concavities/holes.
-Flat reference uses exactly the same mesh/grid; measurements outside the table
-are clipped. Coverage can exceed 1 under stretch; negative action gains remain.
+Genesis's first offscreen draw can miss dynamic geometry uploads, and same-step restores
+can hit rendering caches. The adapter warms graphics buffers once and forces visual
+refresh without stepping physics. The nonflat regression compares RGB/depth against
+physics triangles, checks immediate restore and verifies the physics snapshot is unchanged.
+Rendering compatibility details are version-pinned, not a general Genesis checkpoint API.
 
-## Reset preparation and limits
+The original visual mesh also interpolated across folds, and native depth rendering
+culled folded backfaces. `sim/render_mesh.py` now installs a detached copy of the exact
+physics topology with identity visual supports. A camera-local two-sided depth-only
+pass supplies pixel-center optical depth. This changes rendering fields only; tests
+verify physics state is unchanged. Frozen folded/raised fixtures measured approximately
+5 micrometres maximum sampled depth error after this correction.
 
-All resets start from the declared rest mesh, zero velocities and no attachments.
-`flat` keeps its centered orientation. `fold` uses a seeded planar rotation and a
-reset-only half-fold with finite layer separation, then settles. `drop` samples
-one seeded random material particle, raises it to `(0,0,h)` with h uniform in
-[0.5,0.9] m over 2.5 s using quintic interpolation with zero endpoint velocity,
-holds 0.5 s, and releases it. Only that attached particle receives commands during
-the lift; full-state writes are restricted to initial reset/explicit restore.
+Coverage is the union of projected physics triangles on fixed 2.5 mm metric cells over
+the table. Both observation and flat-reference area use that grid. Overlaps count once,
+concavities remain, off-table area is clipped, and coverage/gain are not clamped.
 
-Settling requires RMS **vector speed** below 0.01 m/s at every outer step for
-0.5 simulated seconds, within a 10 s settling budget. Finite state, table XY
-containment and nonnegative support-height tolerance are independently checked.
-Failure raises `InvalidResetError`, records status/reason, preserves the failed
-terminal state for observation, and clears all attachments. There is no flat
-fallback, damping/friction adjustment, or relaxation of the acceptance gates.
+## Reset and restore
 
-**The random drop reset distribution is unqualified.** Tested final-preparation
-seeds 0, 11 and 24 escaped the 1.2 m table during settling. Seed 24 was chosen by
-an offline geometry check for a central held particle (rest XY approximately
-[-0.01295,0.001715]); it also failed. This is evidence against assuming that
-central acquisition alone fixes the drop reset. Default `kind="drop"` can raise;
-the coordinator should explicitly choose a qualified flat/fold fixture for the
-short integration smoke. Do not silently relabel a fold as a random drop.
+`flat` is a controlled fixture. `fold` uses a continuous semicircular crease of radius
+twice mesh spacing, then a seeded planar rotation and bounded settling. The prior sharp
+15 mm height discontinuity overstretched crease edges by 50-163%; it was removed.
+The continuous initialization has negligible extension and approximately 1.1% maximum
+chord compression on the tested runtime mesh.
 
-Reset inputs are deterministic for a seed and mesh. GPU solver reductions can
-vary at floating point precision; repeated reset observation IDs are not promised
-bitwise identical. IDs hash actual state, time, RGB/depth and scene identity, are
-stable for repeated observation without stepping, and reproduce exactly on the
-tested free-state snapshot restore. An observation consumer gets copies.
+`drop` samples a seeded material point, lifts it smoothly over 2.5 s to table-center XY
+at height 0.5-0.9 m, holds 0.5 s, releases, and settles. Its diverse-bunch distribution
+is unqualified. CLI reset/collection defaults explicitly use fold; library callers can
+request a named preparation. No failed drop silently becomes a fold or flat cloth.
 
-## Tested runtime and commands
+Settling requires RMS vector speed below 0.01 m/s continuously for 0.5 s within ten
+simulated seconds. Reset checks finite state, table containment and support height.
+Failure records preparation metadata and clears attachments. Collection stores failed
+preparations as zero-action episodes, separately from attempted-action rows.
 
-2026-10-19: own sim extra installed with
-`UV_CACHE_DIR=/tmp/cloth-fling-uv-cache uv sync --extra sim --extra dev`.
-Genesis 0.4.3 omits torch from wheel dependencies. Installed torch 2.11.0+cu128
-using `uv pip install --python .venv/bin/python torch --index-url
-https://download.pytorch.org/whl/cu128`. Coordinator is adding the locked CUDA
-torch dependency/index to sim extra and owns uv.lock; Stage 0 does not modify
-package configuration or commit the generated lock. No neighboring project
-source or environment is imported.
+Snapshots store positions, velocities, free flags, runtime topology/rest geometry,
+config/calibration identity, simulated time, reset metadata and a content hash. Restore
+validates before writes, rejects attached snapshots and mismatched configurations, clears
+current attachments, and verifies exact readback. No pickle is required. GPU preparation
+may differ at floating point precision; replay uses saved actual state, not seed equality.
 
-Tested versions: Python 3.12, Genesis 0.4.3, torch 2.11.0+cu128, Quadrants 0.4.4,
-NumPy 2.5.4, trimesh 4.12.2, pymeshlab 2025.7.post1, pytest 9.1.1.
-Host nvidia-smi confirms RTX 5080 16303 MiB, driver 595.91.07, CUDA driver 13.2.
-Sandbox nvidia-smi fails because devices are masked. Host qualification uses
-approved elevated execution without changing sandbox protections. GPU use was
-exclusive and sequential. The slot was released after the final smoke.
+## Validation
 
-CPU checks (no Genesis or torch initialization):
-
-```sh
-.venv/bin/python -m pytest -q tests/test_sim_backend.py tests/test_sim_mesh.py tests/test_coverage.py
-.venv/bin/ruff check src/cloth_fling/sim tests/test_sim* tests/test_coverage*
+```bash
+uv run --locked --extra dev pytest -m 'not gpu'
+CLOTH_FLING_RUN_GPU=1 PYOPENGL_PLATFORM=egl \
+  uv run --locked --extra sim --extra dev pytest -q -s tests/test_sim_gpu.py
 ```
 
-Result: **34 passed in 0.52 s**, Ruff passed. Tests exercise topology, winding,
-camera axes/pixel centres, first-hit/hidden-layer rejection, bounded picks,
-coincident/workspace/separation rejection, projected union with overlap/holes,
-negative gains, NPZ/hash/config/shape validation, attached-snapshot rejection,
-target/step ownership, velocity preservation, explicit failed reset and cleanup.
-
-The GPU test is explicitly gated; normal pytest skips it unless the following
-environment variable is set. Approved host execution command:
-
-```sh
-CLOTH_FLING_RUN_GPU=1 PYOPENGL_PLATFORM=egl UV_CACHE_DIR=/tmp/cloth-fling-uv-cache \
-  .venv/bin/python -m pytest -q -s tests/test_sim_gpu.py
-```
-
-Final result: **1 passed in 17.48 s**, including a reported invalid drop rather
-than a falsely accepted preparation. Main measurements:
-
-| Check | Actual result |
-| --- | --- |
-| Scene build (warm caches) | 4.368 s; 2654 particles, 5106 triangles |
-| Flat seed 7 | 0.514 s settling, final RMS speed 0.00001432 m/s; area/reference 0.25/0.25 m2 |
-| Attachment | Stable IDs (1979,683); exactly two free flags false |
-| 30 next-step endpoint commands, 4 substeps | Maximum error 2.9469e-8 m; instrumented setters touched attached IDs only; no position writes |
-| Release velocity | Both particles [0.0500083,0,0.5000010] m/s; bitwise unchanged across release; finite/nonzero free motion afterward |
-| NPZ restore | Exact positions/velocities/time and observation ID; zero residual attachments |
-| Repeated flat preparation | Maximum position difference 0 m in final run; observation IDs differed (state/image hash remains content-based) |
-| Fold seed 11 | Valid; 5.900 s settling, final RMS speed 0.005838 m/s, coverage 0.480375, area 0.12009375 m2 |
-| Drop seed 11 | Invalid, 5.413 s wall; Y max 0.6000773 m exceeded the 0.6 m table half-width; attachments cleared, terminal observation rendered |
-| Flat RGB cloth chroma min/median/max | 145/146/146 (uint8 max-minus-min) |
-| Flat RGB table chroma min/median/max | 0/0/0; table maximum channel brightness 47 |
-| RGB foreground `(max>45)&(chroma>20)` | 256/256 agreement with first-surface ray hits on balanced 128 foreground + 128 background pixel samples |
-| RGB chroma >30 vs rendered flat cloth depth | Precision=1.0, recall=1.0 on this flat fixture |
-
-The segmentation result is a measured flat-scene compatibility check for Stage 1;
-it does not establish masking quality over a reset distribution or dynamic fling.
-Depth/geometry were used only by the host-side validation, never by RGB selection.
-
-Retained failure history: initial code incorrectly assumed PBD preserved input
-mesh IDs; the 0.005 m particle setting produced 10301 runtime particles. Corrected
-to adopt/validate remeshing at declared spacing. A target floor check initially
-rejected a legal 6 mm endpoint due to float precision; corrected to particle-radius
-floor with 1e-6 m tolerance. Initial fast, off-center 0.6 s drop lift failed; the
-reviewed centered smooth 2.5 s lift still failed seeds listed above. Initial tests
-also exposed non-bitwise repeated reset IDs; exact replay identity is verified
-through snapshot restore instead. GJK mode removes Genesis's small-substep rigid
-collision warning; final run retains torch.jit.script deprecation warnings and a
-Quadrants template mapper caching warning. These warnings did not prevent the
-measured attachment/render/restore checks.
-
-This qualifies the declared local runtime path, flat/fold fixtures, assisted
-attachment mechanics, and explicit failure handling. It does not qualify the
-random bunch distribution, cloth calibration, grasp contact, laydown/fling
-behavior, collection-scale reliability, or any learned policy.
-
-## Nonflat rendering correction (follow-up)
-
-The coordinator's folded-first integration exposed a real rendering bug that the
-original **flat-only** segmentation check did not cover. Before this correction,
-the first RGB/depth frame could show the original axis-aligned visual mesh even
-though physical particle state and coverage were folded. Treat earlier nonflat
-RGB/depth artifacts from that path as invalid and regenerate them; geometry and
-coverage alone did not qualify those observations.
-
-Pinned 0.4.3 source investigation found two separate update requirements:
-
-1. `Camera.render` calls the rasterizer context update, which prepares dynamic
-   vertex buffers. `Rasterizer.render_camera` applies those updates **before**
-   the initial offscreen draw allocates GL buffers. On the first draw, buffer IDs
-   are -1, so updates are ignored and original CPU visual-mesh vertices upload.
-2. `RasterizerContext.update` and `Visualizer.update_visual_states` cache by
-   `scene._t`. Explicit particle setters/restore do not increment that clock, so
-   an ordinary render at the same step can reuse stale visual data.
-
-The fix discards one startup draw to allocate buffers, then uses the public
-`camera.render(..., force_render=True)` for the actual observation. Every later
-uncached observation also forces visual-field and vertex-buffer refresh. The
-backend observation cache still avoids redraws when nothing has changed.
-**No physics stepping, state overwrites, solver changes, or time increments are
-used to refresh rendering.** This keeps Genesis's native shaded triangle surface;
-there is no particle-mode or synthetic policy-mask fallback.
-
-Native PBD visualization skins the original 1 cm visual mesh from 12 neighboring
-remeshed physics particles. Planar rest supports were not the stale-square cause:
-the visual render-field bounds already followed the fold before the GL refresh.
-This skinning is approximate at folds; the regression allows one image-pixel
-silhouette boundary tolerance and at most half a mesh spacing (5 mm by default)
-ray-depth error. It does not claim identity topology between visual and physical
-meshes, or calibrated cloth appearance.
-
-The bounded diagnostic reproduced the coordinator's exact failure pattern:
-
-| Folded first frame | Before refresh | Forced second draw |
-| --- | --- | --- |
-| RGB foreground pixel count | 7396 | 3577 |
-| Foreground bounds [v,u] | [85,85]..[170,170] (original square) | [66,99]..[154,188] (rotated fold) |
-| Foreground precision / recall on 1024 regular ray samples | 0.400 / 0.755 | 0.964 / 1.000 |
-| Ray depth error median / maximum | 14.37 / 39.61 mm | 0.246 / 3.522 mm |
-| Snapshot state hash across forced render | unchanged | unchanged |
-
-Added opt-in GPU regression command:
-
-```sh
-CLOTH_FLING_RUN_GPU=1 PYOPENGL_PLATFORM=egl UV_CACHE_DIR=/tmp/cloth-fling-uv-cache \
-  .venv/bin/python -m pytest -q -s \
-  tests/test_sim_gpu.py::test_nonflat_first_frame_and_immediate_restore
-```
-
-Result: **1 passed in 11.48 s** on the same RTX 5080/runtime. Fold seed 11 is the
-first rendered state. A host-side oracle projects actual physics triangles and
-unions them at every image pixel centre; RGB selection still receives RGB only.
-Each state also checks 128 first-surface ray depths on eroded interior pixels.
-
-| State | Eroded foreground precision / recall | Raw silhouette IoU | Depth error median / p95 / max |
-| --- | --- | --- | --- |
-| Fold as first frame | 1.000 / 1.000 | 0.969464 | 0.270 / 1.803 / 3.425 mm |
-| Same-step shifted/raised nonplanar restore | 1.000 / 1.000 | 0.970259 | 0.296 / 1.856 / 3.010 mm |
-| Fold restored after rendering flat | 1.000 / 1.000 | 0.969464 | 0.270 / 1.803 / 3.425 mm |
-
-The regression verifies a substantial fold-versus-flat silhouette difference and
-shifted-versus-fold difference. Every camera call checks exact snapshot hash and
-physics step-index preservation. Restores explicitly forbid scene.step and verify
-exact positions, velocities, flags, simulated time and metadata through the state
-hash. Fold RGB/depth arrays and content observation ID reproduce bitwise after
-same-step restore and after a flat render. NPZ evidence is written to pytest's
-temporary test directory.
-
-CPU regression now reports **35 passed, 2 GPU tests skipped in 0.50 s**, including
-a new check of startup allocation and forced same-step restore with scene.step
-forbidden. Ruff and whitespace checks pass. The existing bounded host pipeline
-regression also passed against this fix: **1 passed in 17.39 s** (same command
-with `tests/test_sim_gpu.py::test_host_pipeline`). Endpoint error remained
-2.9469e-8 m; release velocities and restore invariants passed. Fold seed 11 was
-valid (coverage 0.480275, RMS speed 0.005845 m/s); drop seed 11 was again explicitly
-invalid. Both opt-in GPU tests ran sequentially. GPU slot released afterward.
-
-The post-fix pipeline run also reproduced repeated flat RGB/state observation
-IDs exactly. The earlier differing flat IDs were not sufficient evidence to
-attribute that difference to GPU reductions; stale first-frame rendering was a
-confound. Seeded reset inputs remain deterministic, while bitwise physical reset
-determinism across runs is still not an acceptance claim.
+GPU use must be serial/exclusive. Sandbox device masking differs from host visibility.
+See `milestone1-results.md` for integrated measurements, artifact locations, qualification
+limits and remaining primitive/reset risks. Runtime and dataset integrity are distinct
+from demonstrated policy improvement or physical-grasp qualification.

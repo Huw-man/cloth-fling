@@ -37,6 +37,10 @@ or `nvidia-smi` alone as a successful physics/rendering test.
 ## First local experiment
 
 Begin with the fixed 50 x 50 cm synthetic cloth in `configs/cloth50.json`.
+The declared scene uses 64 stretch-solver sweeps and an explicit table-contact
+Coulomb-friction adapter, because Genesis 0.4.3's PBD table coupling omits tangential
+friction. Its resting-load approximation and validation limits are documented in
+[runtime qualification](docs/runtime.md); this is not a calibrated hardware model.
 
 ```bash
 uv run --locked --extra sim cloth-fling resets \
