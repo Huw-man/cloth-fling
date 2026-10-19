@@ -2,6 +2,7 @@
 
 import copy
 import json
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -274,3 +275,22 @@ def test_callback_encoder_failure_is_explicit_in_metadata_even_if_owner_catches(
     metadata = recorder.metadata()
     assert not metadata["complete"]
     assert metadata["failure"] == "RuntimeError: encoder failure"
+
+
+@pytest.mark.parametrize("disabled_at_import", [False, True])
+def test_disabled_native_offscreen_markers_fail_clearly(monkeypatch, disabled_at_import):
+    if disabled_at_import:
+        monkeypatch.delenv("GS_DISABLE_OFFSCREEN_MARKERS", raising=False)
+        monkeypatch.setitem(
+            sys.modules,
+            "genesis.ext.pyrender.jit_render",
+            SimpleNamespace(_DISABLE_OFFSCREEN_MARKERS=True),
+        )
+    else:
+        # Genesis treats even a value of "0" as enabled presence of the disable flag.
+        monkeypatch.setenv("GS_DISABLE_OFFSCREEN_MARKERS", "0")
+    env = Env()
+    with pytest.raises(RuntimeError, match="offscreen debug markers are disabled"):
+        render_debug_views(env, phase="lift")
+    assert not env.scene.drawn and env.camera.calls == 0
+    assert set(env.scene.objects) == {"unrelated"}
