@@ -175,3 +175,90 @@ This qualifies the declared local runtime path, flat/fold fixtures, assisted
 attachment mechanics, and explicit failure handling. It does not qualify the
 random bunch distribution, cloth calibration, grasp contact, laydown/fling
 behavior, collection-scale reliability, or any learned policy.
+
+## Nonflat rendering correction (follow-up)
+
+The coordinator's folded-first integration exposed a real rendering bug that the
+original **flat-only** segmentation check did not cover. Before this correction,
+the first RGB/depth frame could show the original axis-aligned visual mesh even
+though physical particle state and coverage were folded. Treat earlier nonflat
+RGB/depth artifacts from that path as invalid and regenerate them; geometry and
+coverage alone did not qualify those observations.
+
+Pinned 0.4.3 source investigation found two separate update requirements:
+
+1. `Camera.render` calls the rasterizer context update, which prepares dynamic
+   vertex buffers. `Rasterizer.render_camera` applies those updates **before**
+   the initial offscreen draw allocates GL buffers. On the first draw, buffer IDs
+   are -1, so updates are ignored and original CPU visual-mesh vertices upload.
+2. `RasterizerContext.update` and `Visualizer.update_visual_states` cache by
+   `scene._t`. Explicit particle setters/restore do not increment that clock, so
+   an ordinary render at the same step can reuse stale visual data.
+
+The fix discards one startup draw to allocate buffers, then uses the public
+`camera.render(..., force_render=True)` for the actual observation. Every later
+uncached observation also forces visual-field and vertex-buffer refresh. The
+backend observation cache still avoids redraws when nothing has changed.
+**No physics stepping, state overwrites, solver changes, or time increments are
+used to refresh rendering.** This keeps Genesis's native shaded triangle surface;
+there is no particle-mode or synthetic policy-mask fallback.
+
+Native PBD visualization skins the original 1 cm visual mesh from 12 neighboring
+remeshed physics particles. Planar rest supports were not the stale-square cause:
+the visual render-field bounds already followed the fold before the GL refresh.
+This skinning is approximate at folds; the regression allows one image-pixel
+silhouette boundary tolerance and at most half a mesh spacing (5 mm by default)
+ray-depth error. It does not claim identity topology between visual and physical
+meshes, or calibrated cloth appearance.
+
+The bounded diagnostic reproduced the coordinator's exact failure pattern:
+
+| Folded first frame | Before refresh | Forced second draw |
+| --- | --- | --- |
+| RGB foreground pixel count | 7396 | 3577 |
+| Foreground bounds [v,u] | [85,85]..[170,170] (original square) | [66,99]..[154,188] (rotated fold) |
+| Foreground precision / recall on 1024 regular ray samples | 0.400 / 0.755 | 0.964 / 1.000 |
+| Ray depth error median / maximum | 14.37 / 39.61 mm | 0.246 / 3.522 mm |
+| Snapshot state hash across forced render | unchanged | unchanged |
+
+Added opt-in GPU regression command:
+
+```sh
+CLOTH_FLING_RUN_GPU=1 PYOPENGL_PLATFORM=egl UV_CACHE_DIR=/tmp/cloth-fling-uv-cache \
+  .venv/bin/python -m pytest -q -s \
+  tests/test_sim_gpu.py::test_nonflat_first_frame_and_immediate_restore
+```
+
+Result: **1 passed in 11.48 s** on the same RTX 5080/runtime. Fold seed 11 is the
+first rendered state. A host-side oracle projects actual physics triangles and
+unions them at every image pixel centre; RGB selection still receives RGB only.
+Each state also checks 128 first-surface ray depths on eroded interior pixels.
+
+| State | Eroded foreground precision / recall | Raw silhouette IoU | Depth error median / p95 / max |
+| --- | --- | --- | --- |
+| Fold as first frame | 1.000 / 1.000 | 0.969464 | 0.270 / 1.803 / 3.425 mm |
+| Same-step shifted/raised nonplanar restore | 1.000 / 1.000 | 0.970259 | 0.296 / 1.856 / 3.010 mm |
+| Fold restored after rendering flat | 1.000 / 1.000 | 0.969464 | 0.270 / 1.803 / 3.425 mm |
+
+The regression verifies a substantial fold-versus-flat silhouette difference and
+shifted-versus-fold difference. Every camera call checks exact snapshot hash and
+physics step-index preservation. Restores explicitly forbid scene.step and verify
+exact positions, velocities, flags, simulated time and metadata through the state
+hash. Fold RGB/depth arrays and content observation ID reproduce bitwise after
+same-step restore and after a flat render. NPZ evidence is written to pytest's
+temporary test directory.
+
+CPU regression now reports **35 passed, 2 GPU tests skipped in 0.50 s**, including
+a new check of startup allocation and forced same-step restore with scene.step
+forbidden. Ruff and whitespace checks pass. The existing bounded host pipeline
+regression also passed against this fix: **1 passed in 17.39 s** (same command
+with `tests/test_sim_gpu.py::test_host_pipeline`). Endpoint error remained
+2.9469e-8 m; release velocities and restore invariants passed. Fold seed 11 was
+valid (coverage 0.480275, RMS speed 0.005845 m/s); drop seed 11 was again explicitly
+invalid. Both opt-in GPU tests ran sequentially. GPU slot released afterward.
+
+The post-fix pipeline run also reproduced repeated flat RGB/state observation
+IDs exactly. The earlier differing flat IDs were not sufficient evidence to
+attribute that difference to GPU reductions; stale first-frame rendering was a
+confound. Seeded reset inputs remain deterministic, while bitwise physical reset
+determinism across runs is still not an acceptance claim.

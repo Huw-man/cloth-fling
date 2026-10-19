@@ -59,6 +59,7 @@ class GenesisBackend:
         self._targets: np.ndarray | None = None
         self._closed = False
         self._observation: Observation | None = None
+        self._render_buffers_ready = False
         self.reset_metadata: dict[str, Any] = {"kind": "initial_flat", "qualified": False}
         self._config_json = _json(config.to_dict())
         self._config_hash = hashlib.sha256(self._config_json.encode()).hexdigest()
@@ -193,7 +194,18 @@ class GenesisBackend:
     def observe(self) -> Observation:
         self._ensure_open()
         if self._observation is None:
-            rgb, depth, _, _ = self.camera.render(rgb=True, depth=True, antialiasing=False)
+            render_options = {"rgb": True, "depth": True,
+                              "antialiasing": False, "force_render": True}
+            if not self._render_buffers_ready:
+                # Genesis 0.4.3 applies pending vertex updates BEFORE the first
+                # offscreen draw allocates GL buffers (IDs are still -1). That
+                # first draw uploads the original static visual mesh. Discard it
+                # and force a second upload of the CURRENT dynamic render fields.
+                self.camera.render(**render_options)
+                self._render_buffers_ready = True
+            # Restore/setters do not increment scene._t. Bypass both visualizer
+            # and rasterizer time caches; refreshing rendering must never step.
+            rgb, depth, _, _ = self.camera.render(**render_options)
             rgb = np.asarray(rgb, dtype=np.uint8).copy()
             depth = np.asarray(depth, dtype=np.float32).copy()
             if (rgb.shape != (self.config.image_size, self.config.image_size, 3)
