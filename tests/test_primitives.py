@@ -283,7 +283,7 @@ def test_compressed_fixture_closed_loop_tauten(short_config):
         np.linalg.norm(np.diff(np.asarray(t["commanded_grasp_positions_m"]), axis=0)) for t in trace
     ]
     assert spans[-1] > spans[0] + 0.005
-    cap = result.diagnostics["rest_geodesic_distance_m"] * (1 + short_config.max_strain)
+    cap = result.diagnostics["rest_flat_chord_m"] * (1 + short_config.max_strain)
     assert max(spans) <= cap + 1e-9
 
 
@@ -304,6 +304,9 @@ def test_rest_geometry_missing_is_labeled_fallback(short_config):
     assert result.execution_valid, result.reason
     assert not result.diagnostics["strain_bound_available"]
     assert result.diagnostics["rest_geodesic_distance_m"] is None
+    assert result.diagnostics["rest_flat_chord_m"] is None
+    assert result.diagnostics["graph_geodesic_distance"] is None
+    assert result.diagnostics["tauten"]["material_bound"] == "fallback"
     assert "no material strain guarantee" in result.diagnostics["proxy_labels"]["missing_rest"]
 
 
@@ -550,3 +553,114 @@ def test_diagnostic_propagates_timeout_after_fixture_restore(short_config):
     assert env.release_calls == 1 and not env.attached_ids
     np.testing.assert_array_equal(env.positions, positions)
     assert env.simulated_time == 0
+
+
+def test_triangulated_graph_bias_does_not_set_material_span(short_config):
+    env = FakeClothBackend()
+    env.config = replace(env.config, max_grasp_separation_m=0.55)
+    env.positions[:, :2] *= 0.8
+    # The existing asymmetric triangle diagonals force the selected pair's graph
+    # path around a corner. Keep the production 0.10 ceiling for this regression.
+    config = replace(short_config, max_strain=PrimitiveConfig().max_strain)
+    first = execute_action(env, action(env), config)
+    assert first.execution_valid, (first.reason, first.diagnostics)
+    diagnostics = first.diagnostics
+    graph, chord = (
+        diagnostics["graph_geodesic_distance"],
+        diagnostics["rest_flat_chord_m"],
+    )
+    assert graph > 1.3 * chord
+    assert diagnostics["tauten"]["span_cap_m"] == pytest.approx(
+        min(env.config.max_grasp_separation_m, chord * (1 + config.max_strain))
+    )
+    assert diagnostics["rest_geodesic_distance_m"] == graph  # historical field stays graph-only
+    assert diagnostics["tauten"]["target_span_m"] == pytest.approx(chord * config.taut_rest_ratio)
+    spans = [
+        np.linalg.norm(np.diff(t["commanded_grasp_positions_m"], axis=0))
+        for t in first.evidence["phase_traces"]
+        if t["phase"] == "tauten"
+    ]
+    assert max(spans) <= chord * config.taut_rest_ratio + 1e-9
+    assert diagnostics["max_edge_strain_proxy"] <= config.max_strain
+    second = execute_action(env, action(env), config)
+    assert second.execution_valid, second.reason
+    assert second.before.observation_id == first.after.observation_id
+    assert second.coverage_before == first.coverage_after
+    assert env.reset_calls == 0
+
+
+def _tauten_fixture(config):
+    import time
+
+    from cloth_fling.sim.primitives import _Execution, _rest_geometry, _rest_path
+
+    env = FakeClothBackend()
+    env.positions[:, :2] *= 0.8
+    env.positions[:, 2] = config.lift_height_m
+    env.attached_ids = (0, 24)
+    env.targets = env.positions[list(env.attached_ids)].copy()
+    run = _Execution(env, config, time.monotonic(), env.simulated_time)
+    run.ids = run.grasp_ids = env.attached_ids
+    run.target = env.targets.copy()
+    run.geometry = _rest_geometry(env, len(env.positions))
+    run.path, run.rest_distance = _rest_path(run.geometry, run.ids, len(env.positions))
+    run.rest_flat_chord = float(np.linalg.norm(env.rest_positions[24] - env.rest_positions[0]))
+    return env, run
+
+
+def test_local_strain_guard_brakes_moving_span_before_hard_ceiling(short_config):
+    config = replace(short_config, max_strain=0.1, max_acceleration_m_s2=0.2, tauten_seconds=2)
+    env, run = _tauten_fixture(config)
+    # Relax the compressed setup with held attachments before injecting a local
+    # disturbance; initial solver transients have their own predictive-stop test.
+    for _ in range(20):
+        env.step()
+    run.sim_started = env.simulated_time
+    step = env.step
+    previous_span = np.linalg.norm(env.targets[1] - env.targets[0])
+    disturbed = False
+
+    def localized_extension():
+        nonlocal previous_span, disturbed
+        step()
+        span = np.linalg.norm(env.targets[1] - env.targets[0])
+        span_rate = (span - previous_span) / env.config.sim_dt
+        previous_span = span
+        if disturbed or span_rate > 0.02:
+            # A local cloth extension disturbance below the hard ceiling. The
+            # unconstrained particles respond inside the fake, never in the primitive.
+            disturbed = True
+            env.positions[12] = env.positions[11] + [0.05 * 1.085, 0, 0]
+
+    env.step = localized_extension
+    run.tauten()
+    assert disturbed
+    diagnostics = run.tauten_diagnostics
+    assert diagnostics["stop_reason"] == "local_strain_guard"
+    brake = diagnostics["strain_brake"]
+    assert brake["span_rate_m_s"] > 0.02
+    assert brake["max_edge_strain_proxy"] == pytest.approx(0.085)
+    assert brake["max_edge_strain_proxy"] < config.max_strain
+    assert brake["predicted_edge_strain_proxy"] >= diagnostics["soft_strain_limit"]
+    assert run.max_strain < config.max_strain
+    assert run.command_acceleration <= config.max_acceleration_m_s2 + 1e-6
+    np.testing.assert_allclose(run.previous_command_velocity, 0, atol=1e-12)
+    assert diagnostics["final_span_m"] < diagnostics["target_span_m"]
+    assert env.simulated_time < config.tauten_seconds  # transition after braking, no long hold
+
+
+def test_positive_local_strain_rate_triggers_predictive_stop(short_config):
+    config = replace(short_config, max_strain=0.1)
+    env, run = _tauten_fixture(config)
+    env.positions[12] = env.positions[11] + [0.05 * 1.07, 0, 0]
+    env.velocities[12, 0] = 0.4  # measured outward velocity predicts the local extension
+    run.tauten()
+    diagnostics = run.tauten_diagnostics
+    assert diagnostics["stop_reason"] == "local_strain_guard"
+    assert diagnostics["strain_brake"]["max_edge_strain_proxy"] < diagnostics["soft_strain_limit"]
+    assert (
+        diagnostics["strain_brake"]["predicted_edge_strain_proxy"]
+        >= diagnostics["soft_strain_limit"]
+    )
+    assert diagnostics["final_span_m"] == pytest.approx(diagnostics["initial_span_m"])
+    assert run.max_strain < config.max_strain

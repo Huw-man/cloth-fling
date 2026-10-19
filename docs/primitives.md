@@ -117,15 +117,36 @@ Lift is one continuous trajectory. Tautening reads the measured grasp geometry
 and shortest-rest-path sag every step. It uses a smooth span-rate envelope, gated
 by measured remaining span and sag, with bounded rate and acceleration. If available,
 rest positions and mesh edges/faces supply a deterministic Dijkstra path and
-rest-edge extension measurements. Span is capped by both scene max separation and
-`rest_geodesic_distance * (1 + max_strain)`. Target span uses `taut_rest_ratio`.
-The graph distance depends on mesh triangulation and is an upper bound on a smooth
-surface geodesic; it is not a tearing model. Every step additionally checks the
-maximum tensile edge extension against `max_strain`. Optional metadata can be
+rest-edge extension measurements. For this flat rectangular rest mesh, the material
+span is the Euclidean distance between the two rest grasp vertices, recorded as
+`rest_flat_chord_m`. Span is capped by scene max separation and
+`rest_flat_chord_m * (1 + max_strain)`, and the expansion target is capped by
+`rest_flat_chord_m * taut_rest_ratio`. An initial span already above the target
+is held without further spreading, provided it remains inside the hard cap.
+The graph distance, recorded as `graph_geodesic_distance` in metres and the
+historical alias `rest_geodesic_distance_m`, is diagnostic only. Triangulation can
+make it substantially longer than the flat material chord; it never enlarges the
+tautening target or bound. The graph path is used only for measured sag feedback.
+Every step checks maximum tensile edge extension against the unchanged
+`max_strain` hard ceiling. Optional metadata can be
 `env.rest_positions`, `env.edges`/`env.faces` or the equivalent keys in `snapshot()`.
 Missing metadata uses bounded endpoint spreading and explicitly reports
 `strain_bound_available=false`; this fallback has no material strain guarantee.
 Malformed metadata or disconnected grasp vertices fail explicitly.
+
+Tautening proactively brakes when any edge's current or projected strain reaches
+80% of `max_strain` (0.08 for the default 0.10 ceiling). Projection uses each edge's
+measured relative velocity along the edge divided by rest length, over a horizon
+of current span stopping time plus two simulation ticks. It never averages away
+an isolated high-strain edge. The stop latches: expansion rate decelerates within
+the configured acceleration bound to zero, then transitions to laydown/swing
+without a long airborne hold. A discrete stopping-distance bound also brakes before
+the material target. No cloth velocity or damping is modified. Predictions are
+proxies and cannot guarantee future strain under cloth inertia or solver error;
+a hard-ceiling violation still invalidates the action. `diagnostics['tauten']`
+records initial/target/final spans, the cap, soft limit, stop reason, and any brake
+trigger's measured/predicted strain, span rate, simulation time and horizon.
+Missing rest metadata disables this strain predictor and retains the labeled fallback.
 
 Laydown moves diagonally down/forward and continues into a short near-table drag.
 The fling candidate retains attachment throughout one continuous swing, pullback,
@@ -198,7 +219,10 @@ Full coverage is measured at trace cadence and action endpoints; finite state,
 edge strain, speed, attachment state and deadlines are checked every physics step.
 Diagnostics record command speed/acceleration maxima, release velocity delta,
 release coverage, post-release recoil, peak sampled settle-coverage recoil,
-settling and metadata availability. Recoil is a signed coverage drop from release
+settling and metadata availability. `rest_flat_chord_m` and
+`graph_geodesic_distance` separately record the material chord and graph-path
+length, both in metres; neither is a force or tearing measurement.
+Recoil is a signed coverage drop from release
 or a nonnegative drop from the sampled settle peak; it is not a force measurement.
 Edge extension, rest-path sag and z-near-table fraction carry explicit proxy labels.
 Table proximity is not native contact and attachment is not a pinch-grasp proof.
@@ -255,7 +279,9 @@ and measurement, not a reproduction of the learned policy or reported results.
 CPU tests use a 25-particle fake with gravity, distance constraints, table collision,
 friction, surface RGB/depth rasterization and two attachment endpoints. They verify
 lifecycle, continuous commands and bounds, negative gain, closed-loop spreading,
-rest-strain failure, release momentum, failed/partial attachment, nonfinite and
+rest-strain failure, triangulation-biased graph distances, proactive local-strain
+braking and strain-rate prediction under the default hard ceiling, release momentum,
+failed/partial attachment, nonfinite and
 unexpected errors, deadlines, continuous settling, no reset across valid actions,
 fixed-pair restore validity and image/state artifacts. Selection tests cover the
 primary perspective schema, gray-table masking, bounded search, deterministic

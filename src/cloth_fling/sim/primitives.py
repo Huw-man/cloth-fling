@@ -99,6 +99,26 @@ def _coverage(env):
     return result
 
 
+@dataclass(frozen=True)
+class _RestGeometry:
+    positions: np.ndarray
+    edges: np.ndarray
+    lengths: np.ndarray
+
+
+def _edge_strain(geometry, positions, velocities=None):
+    a, b = geometry.edges.T
+    delta = positions[b] - positions[a]
+    lengths = np.linalg.norm(delta, axis=1)
+    strain = lengths / geometry.lengths - 1
+    if velocities is None:
+        return strain, None
+    strain_rate = np.sum(delta * (velocities[b] - velocities[a]), axis=1) / (
+        np.maximum(lengths, 1e-12) * geometry.lengths
+    )
+    return strain, strain_rate
+
+
 def _rest_geometry(env, count):
     # Optional metadata, no new backend methods or hidden-particle selection.
     rest = getattr(env, "rest_positions", None)
@@ -131,13 +151,13 @@ def _rest_geometry(env, count):
     lengths = np.linalg.norm(rest[edges[:, 0]] - rest[edges[:, 1]], axis=1)
     if not len(lengths) or np.any(lengths <= 0):
         raise PrimitiveFailure("invalid_rest_edge_lengths")
-    return edges, lengths
+    return _RestGeometry(rest.copy(), edges, lengths)
 
 
 def _rest_path(geometry, ids, count):
     if geometry is None:
         return None, None
-    edges, lengths = geometry
+    edges, lengths = geometry.edges, geometry.lengths
     graph: list[list[tuple[int, float]]] = [[] for _ in range(count)]
     for (a, b), length in zip(edges, lengths, strict=True):
         graph[a].append((int(b), float(length)))
@@ -233,6 +253,8 @@ class _Execution:
         self.geometry = None
         self.path = None
         self.rest_distance = None
+        self.rest_flat_chord = None
+        self.tauten_diagnostics: dict[str, Any] = {}
         self.target = None
         self.last_trace = -math.inf
         self.max_strain = None
@@ -262,10 +284,7 @@ class _Execution:
         self.max_speed = max(self.max_speed, float(speed.max()))
         strain = None
         if self.geometry is not None:
-            edges, lengths = self.geometry
-            strain = float(
-                np.max(np.linalg.norm(p[edges[:, 0]] - p[edges[:, 1]], axis=1) / lengths - 1)
-            )
+            strain = float(np.max(_edge_strain(self.geometry, p)[0]))
             self.max_strain = max(self.max_strain or 0, strain)
             if strain > self.c.max_strain + 1e-6:
                 raise PrimitiveFailure("cloth_strain_limit")
@@ -372,9 +391,11 @@ class _Execution:
         axis /= span
         center = self.target.mean(axis=0)
         cap = float(self.env.config.max_grasp_separation_m)
-        if self.rest_distance is not None:
-            cap = min(cap, self.rest_distance * (1 + self.c.max_strain))
-            goal = min(cap, self.rest_distance * self.c.taut_rest_ratio)
+        if self.rest_flat_chord is not None:
+            # Flat rectangular material distance is the Euclidean rest chord. The
+            # edge-graph path can have a large triangulation/Manhattan bias.
+            cap = min(cap, self.rest_flat_chord * (1 + self.c.max_strain))
+            goal = min(cap, self.rest_flat_chord * self.c.taut_rest_ratio)
         else:
             goal = min(cap, span + self.c.fallback_spread_m)
         if span > cap + 1e-6:
@@ -389,10 +410,22 @@ class _Execution:
         count = max(2, math.ceil(duration / self.dt))
         duration = count * self.dt
         initial_span, rate = span, 0.0
+        acceleration = self.c.max_acceleration_m_s2  # span acceleration; endpoints half
+        soft_limit = 0.8 * self.c.max_strain
+        braking = False
+        self.tauten_diagnostics = {
+            "material_bound": "rest_flat_chord" if self.rest_flat_chord is not None else "fallback",
+            "initial_span_m": span,
+            "target_span_m": goal,
+            "span_cap_m": cap,
+            "soft_strain_limit": soft_limit if self.geometry is not None else None,
+            "stop_reason": "envelope_completed",
+            "strain_brake": None,
+        }
         # Match the tiny finite-difference residual from the completed lift.
         self.previous_command_velocity = np.zeros((2, 3))
         for step in range(1, count + 1):
-            p, _ = _state(self.env)
+            p, v = _state(self.env)
             measured_span = float(np.linalg.norm(p[self.ids[1]] - p[self.ids[0]]))
             slack = max(0.0, goal - measured_span)
             gate = min(1.0, slack / max(goal - initial_span, 1e-9))
@@ -405,16 +438,41 @@ class _Execution:
                     np.linalg.norm(relative - np.outer(relative @ unit, unit), axis=1).max()
                 )
                 gate = min(gate, sag / self.c.taut_sag_tolerance_m)
+            if self.geometry is not None and not braking:
+                strain, strain_rate = _edge_strain(self.geometry, p, v)
+                # Predict each edge over endpoint braking plus two physics ticks;
+                # take the worst edge, never an average that hides local extension.
+                horizon = rate / acceleration + 2 * self.dt
+                predicted = float(np.max(strain + np.maximum(strain_rate, 0) * horizon))
+                if predicted >= soft_limit:
+                    braking = True
+                    self.tauten_diagnostics["stop_reason"] = "local_strain_guard"
+                    self.tauten_diagnostics["strain_brake"] = {
+                        "simulated_seconds": float(self.env.simulated_time) - self.sim_started,
+                        "max_edge_strain_proxy": float(np.max(strain)),
+                        "predicted_edge_strain_proxy": predicted,
+                        "span_rate_m_s": rate,
+                        "prediction_horizon_seconds": horizon,
+                    }
             u = step / count
             envelope = 30 * u**2 * (1 - u) ** 2 * (goal - initial_span) / duration
-            desired_rate = min(envelope * gate, max(0.0, goal - span) / self.dt)
-            delta = self.c.max_acceleration_m_s2 * self.dt  # span acceleration; endpoint half
+            remaining = max(0.0, goal - span)
+            # Reserve a full tick and continuous stopping distance before the goal:
+            # next_rate*dt + next_rate**2/(2*a) <= remaining.
+            stopping_rate = math.sqrt((acceleration * self.dt) ** 2 + 2 * acceleration * remaining)
+            stopping_rate = max(0.0, stopping_rate - acceleration * self.dt)
+            desired_rate = 0.0 if braking else min(envelope * gate, stopping_rate)
+            delta = acceleration * self.dt
             rate += float(np.clip(desired_rate - rate, -delta, delta))
             span += rate * self.dt
             if span > cap + 1e-9:
                 raise PrimitiveFailure("tauten_rest_span_limit")
             self.step("tauten", np.array([center - axis * span / 2, center + axis * span / 2]))
+            if braking and rate == 0.0:
+                break
         self.step("tauten", self.target)
+        self.tauten_diagnostics["final_span_m"] = span
+        self.sample("tauten", force=True)
 
     def settle(self):
         self.phase("settle")
@@ -491,6 +549,12 @@ def execute_action(
         run.ids = ids
         run.grasp_ids = ids
         run.path, run.rest_distance = _rest_path(run.geometry, ids, len(p))
+        if run.geometry is not None:
+            run.rest_flat_chord = float(
+                np.linalg.norm(run.geometry.positions[ids[1]] - run.geometry.positions[ids[0]])
+            )
+            if run.rest_flat_chord <= 1e-12:
+                raise PrimitiveFailure("degenerate_rest_grasp_chord")
         p, _ = _state(env)
         run.target = p[list(ids)].copy()
         run.phase("attach")
@@ -609,6 +673,9 @@ def execute_action(
         "behavior_passed": None,
         "depth_geometry_privileged": True,
         "rest_geodesic_distance_m": run.rest_distance if run else None,
+        "graph_geodesic_distance": run.rest_distance if run else None,
+        "rest_flat_chord_m": run.rest_flat_chord if run else None,
+        "tauten": run.tauten_diagnostics if run else {},
         "strain_bound_available": bool(run and run.geometry is not None),
         "max_edge_strain_proxy": run.max_strain if run else None,
         "max_cloth_speed_m_s": run.max_speed if run else None,
@@ -625,7 +692,8 @@ def execute_action(
         "proxy_labels": {
             "max_edge_strain_proxy": "mesh edge extension/rest length minus one; not stress",
             "table_proximity_fraction_proxy": "z <= table+0.01m; not native contact",
-            "tauten": "rest-path sag/chord feedback; no force sensor",
+            "tauten": "flat-rest chord target; graph path sag proxy; no force sensor",
+            "strain_prediction": "edge extension/rate extrapolation over braking horizon; not stress",
             "missing_rest": "endpoint span fallback; no material strain guarantee",
         },
     }
