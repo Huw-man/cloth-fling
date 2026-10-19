@@ -112,3 +112,18 @@ def test_config_validation_before_genesis_import():
 
     with pytest.raises(ValueError):
         module.GenesisBackend(SceneConfig(sim_dt=-1))
+
+
+def test_finite_radius_fold_avoids_crease_extension_impulse():
+    from cloth_fling.sim.mesh import finite_radius_fold, mesh_edges
+
+    rest, faces = square_mesh(0.5, 0.01)
+    edges = mesh_edges(faces)
+    folded = finite_radius_fold(rest, radius=0.02, base_height=0.006)
+    rest_lengths = np.linalg.norm(rest[edges[:, 0]] - rest[edges[:, 1]], axis=1)
+    lengths = np.linalg.norm(folded[edges[:, 0]] - folded[edges[:, 1]], axis=1)
+    strain = lengths / rest_lengths - 1
+    assert strain.max() < 1e-5
+    assert strain.min() > -0.03
+    assert folded[:, 2].min() == pytest.approx(0.006)
+    assert folded[:, 2].max() == pytest.approx(0.046)

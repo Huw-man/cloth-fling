@@ -16,6 +16,7 @@ class SceneConfig:
     areal_density_kg_m2: float = 0.3
     sim_dt: float = 0.002
     max_stretch_solver_iterations: int = 64
+    table_friction: bool = True
     table_size_m: float = 1.2
     grasp_workspace_m: float = 0.9
     min_grasp_separation_m: float = 0.08
@@ -71,6 +72,8 @@ class SceneConfig:
             or not 1 <= self.max_stretch_solver_iterations <= 128
         ):
             raise ValueError("max_stretch_solver_iterations must be an integer in [1, 128]")
+        if not isinstance(self.table_friction, bool):
+            raise ValueError("table_friction must be a boolean")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

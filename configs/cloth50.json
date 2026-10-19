@@ -4,6 +4,7 @@
   "areal_density_kg_m2": 0.3,
   "sim_dt": 0.002,
   "max_stretch_solver_iterations": 64,
+  "table_friction": true,
   "table_size_m": 1.2,
   "grasp_workspace_m": 0.9,
   "min_grasp_separation_m": 0.08,

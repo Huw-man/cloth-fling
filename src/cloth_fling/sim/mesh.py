@@ -8,6 +8,30 @@ from pathlib import Path
 import numpy as np
 
 
+def finite_radius_fold(positions: np.ndarray, radius: float, base_height: float) -> np.ndarray:
+    """Reset-only half fold with a continuous, approximately isometric semicircular crease.
+
+    Material x runs along arc length through a semicircle; neither side jumps in z.
+    Discrete mesh edges approximate arc chords, avoiding the sharp fold's extension impulse.
+    """
+    if not np.isfinite([radius, base_height]).all() or radius <= 0:
+        raise ValueError("fold radius must be positive and fold height finite")
+    result = np.asarray(positions, dtype=float).copy()
+    if result.ndim != 2 or result.shape[1] != 3 or not np.isfinite(result).all():
+        raise ValueError("fold positions must be finite N x 3")
+    x = result[:, 0].copy()
+    width = np.pi * radius / 2
+    arc = np.abs(x) < width
+    top = x >= width
+    theta = (x[arc] + width) / radius
+    result[:, 2] = base_height
+    result[top, 0] = -x[top]
+    result[top, 2] = base_height + 2 * radius
+    result[arc, 0] = -width + radius * np.sin(theta)
+    result[arc, 2] = base_height + radius * (1 - np.cos(theta))
+    return result
+
+
 def square_mesh(size: float = 0.5, spacing: float = 0.01) -> tuple[np.ndarray, np.ndarray]:
     """Return a centred, +z-facing square, with spacing no larger than requested."""
     if not np.isfinite([size, spacing]).all() or min(size, spacing) <= 0:

@@ -213,18 +213,32 @@ def test_host_pipeline(tmp_path):
         assert (~backend._free()).sum() == 2
         # Instrument public setters: only the two attached IDs may be commanded.
         calls = []
+        contact_calls = []
+        in_contact = [False]
+        original_contact = backend._apply_table_friction
         original_velocity = backend.cloth.set_particles_vel
         original_position = backend.cloth.set_particles_pos
 
         def checked_velocity(values, particles_idx_local=None, **kwargs):
-            calls.append(tuple(particles_idx_local) if particles_idx_local is not None else None)
+            target_calls = contact_calls if in_contact[0] else calls
+            target_calls.append(
+                tuple(particles_idx_local) if particles_idx_local is not None else None
+            )
             return original_velocity(values, particles_idx_local, **kwargs)
+
+        def checked_contact():
+            in_contact[0] = True
+            try:
+                return original_contact()
+            finally:
+                in_contact[0] = False
 
         def no_position_writes(*args, **kwargs):
             pytest.fail("motion attempted a particle position overwrite")
 
         backend.cloth.set_particles_vel = checked_velocity
         backend.cloth.set_particles_pos = no_position_writes
+        backend._apply_table_friction = checked_contact
         initial = backend.get_positions()[list(ids)]
         endpoint_errors = []
         for i in range(1, 31):
@@ -235,6 +249,7 @@ def test_host_pipeline(tmp_path):
                 float(np.max(np.abs(backend.get_positions()[list(ids)] - target)))
             )
         assert calls and set(calls) == {ids}
+        assert all(set(contact_ids).isdisjoint(ids) for contact_ids in contact_calls)
         assert max(endpoint_errors) < 2e-5
         report["max_endpoint_error_m"] = max(endpoint_errors)
         velocity = backend.get_velocities()[list(ids)]
@@ -248,6 +263,7 @@ def test_host_pipeline(tmp_path):
         assert backend.attached_ids == () and backend._free().all()
         backend.cloth.set_particles_vel = original_velocity
         backend.cloth.set_particles_pos = original_position
+        backend._apply_table_friction = original_contact
         backend.step()
         assert np.isfinite(backend.get_positions()).all()
         assert np.linalg.norm(backend.get_velocities()[list(ids)]) > 0.1

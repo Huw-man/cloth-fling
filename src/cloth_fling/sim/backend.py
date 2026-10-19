@@ -15,8 +15,16 @@ from typing import Any, Self
 import numpy as np
 
 from cloth_fling.contracts import Observation, SceneConfig
+from cloth_fling.sim.contact import table_friction_velocities
 from cloth_fling.sim.coverage import CoverageGrid
-from cloth_fling.sim.mesh import mesh_edges, mesh_identity, resolve_grasps, square_mesh, write_obj
+from cloth_fling.sim.mesh import (
+    finite_radius_fold,
+    mesh_edges,
+    mesh_identity,
+    resolve_grasps,
+    square_mesh,
+    write_obj,
+)
 
 
 class InvalidResetError(RuntimeError):
@@ -321,12 +329,32 @@ class GenesisBackend:
                 velocity = (self._targets - current) / self.config.sim_dt
                 self.cloth.set_particles_vel(velocity, list(self.attached_ids))
             self.scene.step()
+            self._apply_table_friction()
             self.simulated_time += self.config.sim_dt
             self._dirty()
             if self.attached_ids:
                 actual = self.get_positions()[list(self.attached_ids)]
                 if not np.allclose(actual, self._targets, atol=2e-5, rtol=0):
                     raise RuntimeError("attachment endpoint readback failed")
+
+    def _apply_table_friction(self) -> None:
+        """Physics-only tangential Coulomb impulse after native normal contact resolution."""
+        if not self.config.table_friction:
+            return
+        free = np.ones(len(self.rest_positions), dtype=bool)
+        free[list(self.attached_ids)] = False
+        velocity, ids = table_friction_velocities(
+            self.get_positions(),
+            self.get_velocities(),
+            free=free,
+            table_size=self.config.table_size_m,
+            radius=self.particle_diameter / 2,
+            dt=self.config.sim_dt,
+            static_friction=self.config.static_friction,
+            kinetic_friction=self.config.kinetic_friction,
+        )
+        if len(ids):
+            self.cloth.set_particles_vel(velocity[ids], ids.tolist())
 
     def release(self) -> None:
         self._ensure_open()
@@ -444,11 +472,9 @@ class GenesisBackend:
         rotation = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
         positions[:, 2] = self._initial_height
         if kind == "fold":
-            # Reset-only half-fold: preserve each half's in-plane lengths, with
-            # finite interlayer spacing before the bounded settling stage.
-            side = positions[:, 0] > 0
-            positions[side, 0] *= -1
-            positions[side, 2] += self.particle_diameter * 1.5
+            radius = 2 * self.config.mesh_spacing_m
+            positions = finite_radius_fold(positions, radius, self._initial_height)
+            self.reset_metadata["crease_radius_m"] = radius
         positions[:, :2] = positions[:, :2] @ rotation.T
         self.cloth.release_particle()
         self.cloth.set_particles_pos(positions)

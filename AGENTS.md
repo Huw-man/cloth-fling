@@ -14,6 +14,8 @@ and Parquet/image/state dataset tools. Training/model releases and publication a
 - Never reset between valid actions. Record invalid attempts and terminal next observations.
 - Keep negative coverage gains. Do not treat hand paths or regression loss as behavior proof.
 - Attached particles only may receive motion commands. Release must retain velocity.
+  A separate, explicit table-contact physics adapter may apply dissipative tangential
+  Coulomb impulses to supported free particles; this must never be hidden as control.
 - Privileged geometry/depth/state are execution/evaluation artifacts, never learned RGB input.
 - No arms, IK, pinch grasping, AWS, neighboring-checkout imports, or machine-specific paths.
 
