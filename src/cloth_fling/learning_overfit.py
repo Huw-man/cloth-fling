@@ -410,6 +410,30 @@ def report(root, *, verify=True):
     if stage_intents != {s["stage"] for s in ledger["stages"]}:
         errors.append("stage intent/ledger mismatch")
     results = episode_results(root)
+    result_names = {r["episode"] for r in results}
+    unfinalized = []
+    for intent in sorted((root / "episodes").glob("*/intent.json")):
+        if intent.parent.name in result_names:
+            continue
+        item = {
+            "episode": intent.parent.name,
+            "status": "uncertain_no_result_receipt",
+            "actions": [],
+        }
+        try:
+            dataset = intent.parent / "dataset"
+            item["actions"] = [
+                {
+                    key: row.get(key)
+                    for key in ("step_id", "execution_valid", "reason", "coverage_after")
+                }
+                for row in read_transitions(dataset).to_pylist()
+            ]
+            if verify and not verify_dataset(dataset)["valid"]:
+                errors.append(f"unfinalized dataset verification: {intent.parent.name}")
+        except Exception as exc:
+            item["artifact_error"] = f"{type(exc).__name__}: {exc}"
+        unfinalized.append(item)
     expected_episodes = set(ledger["episodes"])
     if {r["episode"] for r in results} != expected_episodes:
         errors.append("episode result/ledger mismatch")
@@ -520,6 +544,8 @@ def report(root, *, verify=True):
         "integrity_errors": errors,
         "claimed_actions": max(len(intents), len(ledger["actions"])),
         "completed_episodes": len(results),
+        "unfinalized_episodes": unfinalized,
+        "result_receipt_actions": sum(len(r["actions"]) for r in results),
         "charged_seconds": ledger["charged_seconds"],
         "coverage_target": coverage_target,
         "primary_milestone": {

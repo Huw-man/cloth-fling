@@ -322,6 +322,30 @@ def test_first_80_hit_survives_later_recorded_failure_without_relabeling():
     assert overfit.first_target_hit(result) is None
 
 
+def test_unfinalized_dataset_failure_remains_visible_and_cannot_qualify(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    journal = overfit.Journal(tmp_path / "run")
+    folder = journal.root / "episodes" / "failed"
+    overfit.claim(folder / "intent.json", {})
+    journal.claim_action("failed", 0)
+    row = {
+        "step_id": 0,
+        "execution_valid": False,
+        "reason": "execution_exception: native safeguard",
+        "coverage_after": None,
+    }
+    monkeypatch.setattr(
+        overfit, "read_transitions", lambda root: SimpleNamespace(to_pylist=lambda: [row])
+    )
+    result = overfit.report(journal.root, verify=False)
+    assert result["claimed_actions"] == 1 and result["result_receipt_actions"] == 0
+    assert result["unfinalized_episodes"][0]["actions"] == [row]
+    assert result["unfinalized_episodes"][0]["status"] == "uncertain_no_result_receipt"
+    assert not result["qualified"] and result["integrity_errors"]
+    assert not (folder / "result.json").exists()
+
+
 def test_cli_80_default_and_explicit_legacy_target():
     from cloth_fling.cli import build_parser
 
