@@ -41,7 +41,9 @@ The [two-action image-grasp integration pilot](docs/image-grasp-pilot.md) comple
 the selection/attachment/laydown loop twice without resetting. Continuity passed;
 both random grasps reduced coverage and the second action remained unsettled.
 The original verdict missed lateral jumps in the final tug and is superseded for
-motion continuity. A bounded repeat uses the corrected v2 motion and command audit.
+motion continuity. The corrected v2 repeat passed both tug-command audits and
+settled after both actions; coverage was .993333 → .449317 → .625150. General
+grasp selection and material fidelity remain unqualified.
 
 ## Install and check Genesis 1.4.4
 

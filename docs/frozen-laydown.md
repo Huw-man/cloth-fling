@@ -86,6 +86,13 @@ acceleration bounds. The pilot now independently assesses recorded tug targets,
 including entry and exit, and rejects the original jumps. Its repeat is separate
 evidence in `docs/image-grasp-pilot.md`.
 
+The v2 repeat completed both image-selected actions with native cleanup and exact
+state continuity. Both executed 2 mm tugs with at most 6.94e−18 m lateral target
+error; both cloth states settled. Coverage was .993333 → .449317 → .625150, and
+peak material edge ratios were 1.564957 and 1.661032. These results verify this
+coordinate correction and local integration, not general grasp or material
+qualification. The repeat remains terminal and separate from all v1 evidence.
+
 ## Historical v1 evidence and verification scope
 
 The user approved one favorable-grasp native demonstration: .979767 final
