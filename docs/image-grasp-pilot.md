@@ -13,8 +13,8 @@ extras and the exclusive RTX 5080 lease:
 UV_CACHE_DIR=/tmp/cloth-fling-uv-cache .venv/bin/python -m cloth_fling.reference_pilot
 ```
 
-The current v3 default output is `runs/image-grasp-laydown-pilot-drag-v3-20261019/`.
-The original v1/v2 outputs remain terminal and untouched. The runner claims
+The current v4 default output is `runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/`.
+All previous outputs remain terminal and untouched. The runner claims
 this directory before opening a scene and refuses any existing output, including
 an interrupted, failed or successful run. No resume or automatic execution retry
 exists. `--output` and `--fixture` select artifact locations; the input fixture must
@@ -52,12 +52,33 @@ physical pinch grasping.
 The dataset, action claims, source fixture, restoration certificate, cleanup and
 report remain under the output directory. The replay is:
 
-`runs/image-grasp-laydown-pilot-drag-v3-20261019/replay/combined.mp4`
+`runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/replay/combined.mp4`
 
 Fold generators, broader reset distributions, training, publication, cloud and
 hardware work are deferred. All historical campaigns remain terminal.
 
-## V3 longer drag and centered placement
+## V4 measured centering correction
+
+The v3 development episode completed the longer drags but failed to center the
+folded cloth: final footprint centers were (.644077, −.028072) and
+(.696095, −.104403) m. The actual drags increased instantaneous projected coverage
+by .037200 and .053433, while final coverage was .419850 and .423200. Integration
+passed; placement did not meet the centering goal. Preserve its 105.808-second
+run in `runs/image-grasp-laydown-pilot-drag-v3-20261019/`.
+
+One correction estimates trailing extent from measured airborne vertical drop,
+using factor .43 calibrated on those two development outcomes. It also shifts
+the diagonal smoothly in Y to align the observed hanging footprint. Record this
+privileged execution geometry and actual coefficients, with no leakage into the
+RGB selector. During the ensuing full 12 cm drag, Y and Z remain fixed.
+
+The default `--budget-predecessor` points to the terminal v3 report. Subtract its
+charge from the same one-hour ceiling; uncertain or exhausted predecessors cannot
+open a scene. The additional check remains at most two evolving actions with
+the same fixture/RNG and no resets/rerolls. This single correction is development
+evidence, not general or held-out placement qualification.
+
+## Historical V3 longer drag and nominal placement
 
 The current user-requested revision uses a continuous 12 cm / two-second drag,
 one-fifth of the cloth length. The diagonal ends at X=.73 m before dragging to

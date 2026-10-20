@@ -1,8 +1,8 @@
 # Frozen laydown after grasp
 
-`reference_post_grasp_laydown_v3` lengthens the final drag of the user-selected
+`reference_post_grasp_laydown_v4` lengthens the final drag and centers the user-selected
 continuation from `docs/friction-motion-continued.md`. The operator
-configuration is `configs/reference-post-grasp-laydown-v3-frozen.json`; an identical
+configuration is `configs/reference-post-grasp-laydown-v4-frozen.json`; an identical
 packaged copy lets installed code load it without a checkout or run directory.
 The specification pins controller implementation hashes, the reference physical
 configuration, exact trajectory coefficients/schedule, and the selected run,
@@ -50,9 +50,10 @@ now named `grasp_handoff`, followed by:
 
 - Two-second lift to midpoint X=.10 m, Z=.95 m, preserving midpoint Y.
 - Bounded tautening and three seconds of whole-cloth airborne hold.
-- The six-second C2 diagonal to X=.73 m, Z=.31 m, preserving the tautened span.
+- A six-second C2 diagonal toward an endpoint computed from the hanging cloth,
+  ending at Z=.31 m, preserving the tautened span.
 - One-second stabilization, then a continuous two-second C2 drag forward 12 cm
-  to X=.85 m at Z=.31 m. The drag is one-fifth of the 60 cm cloth length.
+  at Z=.31 m. The drag is one-fifth of the 60 cm cloth length.
 - One-second endpoint hold, velocity-preserving release, .2-second release hold
   and five seconds of unsupported settling.
 
@@ -63,7 +64,24 @@ Numerical/domain/deformation/ownership/deadline and native release/cleanup stops
 remain. This is the existing `demonstration` execution policy, now selected as the
 frozen post-grasp continuation; historical qualification defaults are unchanged.
 
-## V3 final drag and placement target
+## V4 measured placement correction
+
+The v3 nominal full-length placement completed its 12 cm drags but left the
+folded cloth 9.82 cm and 17.96 cm off center. V4 uses the measured hanging cloth
+instead of assuming a fully extended .60 m trailing body. After the airborne
+hold, estimate the final grasp's X offset from the desired cloth center as .43
+times the hanging vertical drop. Subtract .12 m for the diagonal endpoint. During
+the diagonal, smoothly shift Y by the negative projected cloth bounding-box Y
+center. The full two-second drag then holds that resulting pin Y/Z fixed.
+
+The .43 factor is a single measured development correction from the two v3 cases,
+not a general cloth model or learned selector. Record the measurement, estimated
+offset and actual polynomial coefficients in each action. Check kinematic bounds
+before executing the adapted segments; no free-particle relocation is permitted.
+The six-second diagonal, two-second drag and complete phase reservation are
+unchanged. V3 code/configuration remain reproducible at `a67963d`.
+
+## Historical V3 final drag and placement target
 
 The user requested a meaningful final table drag and a centered cloth afterward.
 V3 replaces the millimetre adaptive tug with a full 12 cm drag over two seconds.

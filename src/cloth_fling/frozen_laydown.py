@@ -8,9 +8,9 @@ from pathlib import Path
 from cloth_fling.contracts import GraspAction
 from cloth_fling.reference_diagonal_motion import DiagonalTrajectory, execute_diagonal_action
 
-VERSION = "reference_post_grasp_laydown_v3"
-CONFIG_NAME = "reference-post-grasp-laydown-v3-frozen.json"
-CONFIG_SHA256 = "9439a4c87f419711df9a01eb6f9bda24340575edc94ec8a35fef7aa0f6756647"
+VERSION = "reference_post_grasp_laydown_v4"
+CONFIG_NAME = "reference-post-grasp-laydown-v4-frozen.json"
+CONFIG_SHA256 = "6a5caa7c01afa0735882b575c197c513556f7e8903fd23e8fe7c8d6334278339"
 
 
 def frozen_laydown_spec():

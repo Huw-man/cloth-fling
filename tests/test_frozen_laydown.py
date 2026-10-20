@@ -174,7 +174,7 @@ def test_frozen_artifacts_match_the_selected_trajectory_and_packaged_copy():
 
 
 def test_freeze_loader_is_offline_and_independent_of_the_current_working_directory(tmp_path):
-    code = "import sys; from cloth_fling.frozen_laydown import frozen_laydown_spec; assert frozen_laydown_spec()['version']=='reference_post_grasp_laydown_v3'; assert 'genesis' not in sys.modules and 'torch' not in sys.modules"
+    code = "import sys; from cloth_fling.frozen_laydown import frozen_laydown_spec; assert frozen_laydown_spec()['version']=='reference_post_grasp_laydown_v4'; assert 'genesis' not in sys.modules and 'torch' not in sys.modules"
     import os
 
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")}

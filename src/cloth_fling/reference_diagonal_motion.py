@@ -22,7 +22,7 @@ class DiagonalTrajectory:
     max_tug_m: float = 0.02
 
     def __post_init__(self):
-        if self.version == "reference_diagonal_drag_v4":
+        if self.version in ("reference_diagonal_drag_v4", "reference_diagonal_centered_drag_v5"):
             if (
                 self.endpoint_x_m,
                 self.diagonal_seconds,
@@ -65,7 +65,7 @@ def diagonal_schedule(config, dt=0.02):
             break
         duration = np.ceil(duration * factor / dt) * dt
     segments = [segment]
-    if config.version == "reference_diagonal_drag_v4":
+    if config.version in ("reference_diagonal_drag_v4", "reference_diagonal_centered_drag_v5"):
         drag = Quintic.between(
             "tug",
             2.0,
@@ -95,6 +95,47 @@ def diagonal_schedule(config, dt=0.02):
             }
             for s in segments
         ],
+    }
+
+
+def centered_placement_segments(env, target):
+    """Development geometry estimate after the hold; never relocate free particles."""
+    p = env.get_positions()
+    midpoint = target.mean(axis=0)
+    hanging_drop = max(0.0, float(midpoint[2] - p[:, 2].min()))
+    body_y = float((p[:, 1].min() + p[:, 1].max()) / 2)
+    center_x, center_y = env.config.table_center_xy_m
+    # One measured development correction: folded cloth's trailing offset is
+    # shorter than half its rest length. This is not a general unfolding model.
+    trailing_offset = 0.43 * hanging_drop
+    final_x = center_x + trailing_offset
+    start_x = final_x - 0.12
+    segments = [
+        Quintic.between(
+            "diagonal",
+            6.0,
+            [midpoint[0], 0, midpoint[2]],
+            [start_x, center_y - body_y, 0.31],
+            [0, 0, 0],
+            [0, 0, 0],
+        ),
+        Quintic.between("tug", 2.0, [start_x, 0, 0.31], [final_x, 0, 0.31], [0, 0, 0], [0, 0, 0]),
+    ]
+    if any(s.maximum_norm(1) > 0.8 or s.maximum_norm(2) > 2 for s in segments):
+        raise ReferenceMotionFailure("centered_placement_kinematic_limit")
+    xmin, xmax, _, _ = env.config.table_bounds_m
+    if not xmin <= start_x < final_x <= xmax:
+        raise ReferenceMotionFailure("centering_target_outside_table")
+    return segments, {
+        "method": "hanging_drop_and_projected_Y_center_v1",
+        "target_footprint_center_xy_m": [center_x, center_y],
+        "measured_hanging_drop_m": hanging_drop,
+        "measured_projected_Y_center_m": body_y,
+        "trailing_drop_factor": 0.43,
+        "estimated_trailing_offset_m": trailing_offset,
+        "planned_pre_drag_midpoint_x_m": start_x,
+        "planned_post_drag_midpoint_x_m": final_x,
+        "planned_laydown_Y_displacement_m": center_y - body_y,
     }
 
 
@@ -341,6 +382,7 @@ def execute_diagonal_action(
     reason, failure, settled, cleanup = "completed", None, False, {}
     terminal_state, after = None, None
     release_ordering = []
+    placement_centering = None
     try:
         run.ids = tuple(env.attached_ids) if retain_existing_grasp else env.attach(action.pixels)
         if run.ids != tuple(expected_ids):
@@ -357,7 +399,18 @@ def execute_diagonal_action(
         run.hold("airborne_hold", 3.0)
         if run.hold_clearance <= 0:
             run.placement_failure("airborne_clearance_failure")
-        if trajectory.version == "reference_diagonal_drag_v4":
+        if trajectory.version == "reference_diagonal_centered_drag_v5":
+            segments, placement_centering = centered_placement_segments(env, run.target)
+            schedule["segments"] = [
+                {"phase": s.name, "seconds": s.seconds, "coefficients": s.coefficients.tolist()}
+                for s in segments
+            ]
+            schedule["peak_speed_m_s"] = max(s.maximum_norm(1) for s in segments)
+            schedule["peak_acceleration_m_s2"] = max(s.maximum_norm(2) for s in segments)
+        if trajectory.version in (
+            "reference_diagonal_drag_v4",
+            "reference_diagonal_centered_drag_v5",
+        ):
             run.curve(segments[0])
             run.perform_drag(segments[1])
         else:
@@ -492,6 +545,7 @@ def execute_diagonal_action(
             "config": {"profile": "reference_diagonal_v3", "table_height_m": 0.3},
             "trajectory": asdict(trajectory),
             "schedule": schedule,
+            "placement_centering": placement_centering,
             "commands": run.commands,
             "particle_contacts": run.particle_contacts,
             "slack_traces": run.slack,

@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 from test_reference_diagonal import DemonstrationFake
 
-from cloth_fling.frozen_laydown import frozen_laydown_spec
 from cloth_fling.reference_diagonal_motion import (
     DiagonalMotion,
     DiagonalTrajectory,
@@ -112,7 +111,7 @@ def test_v3_preserves_prior_frozen_bytes_and_physics():
         == "604c16538dcb6e7dcbb7fac4f41c32a7c2a7fc8a931f1f68e4d338f6f46d19c2"
     )
     old = json.loads(path.read_text())
-    new = frozen_laydown_spec()
+    new = json.loads((root / "configs/reference-post-grasp-laydown-v3-frozen.json").read_text())
     assert new["scene"] == old["scene"] and new["handoff"] == old["handoff"]
     assert new["version"] == "reference_post_grasp_laydown_v3"
     assert new["controller"]["final_drag_fraction_cloth_length"] == 0.2

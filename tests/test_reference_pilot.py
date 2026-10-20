@@ -209,15 +209,30 @@ def test_run_claims_once_closes_scene_and_preserves_actions_on_render_failure(
         return {"truncated": False, "physics_reexecuted": False}
 
     root = tmp_path / "run"
+    predecessor = tmp_path / "prior-report.json"
+    predecessor.write_text(json.dumps({"status": "complete", "wall_seconds": 105.8}))
     if render_failure:
         with pytest.raises(RuntimeError, match="encoder failed"):
-            pilot.run_pilot(root, source, backend_factory=lambda config: env, renderer=render)
+            pilot.run_pilot(
+                root,
+                source,
+                backend_factory=lambda config: env,
+                renderer=render,
+                budget_predecessor=predecessor,
+            )
         report = json.loads((root / "pilot-report.json").read_text())
         assert report["status"] == "failed_or_uncertain" and not report["integration_passed"]
     else:
-        report = pilot.run_pilot(root, source, backend_factory=lambda config: env, renderer=render)
+        report = pilot.run_pilot(
+            root,
+            source,
+            backend_factory=lambda config: env,
+            renderer=render,
+            budget_predecessor=predecessor,
+        )
         assert report["status"] == "complete" and report["integration_passed"]
     assert len(rendered) == 1 and rendered[0][2]["fps"] == 10
+    assert report["cumulative_wall_seconds"] == pytest.approx(105.8 + report["wall_seconds"])
     assert len(report["actions"]) == 2
     assert all(a["cleanup_passed"] for a in report["actions"])
     assert verify_dataset(root / "dataset")["valid"]

@@ -282,3 +282,20 @@ training. The full drag uses the existing two-second reservation; do not extend
 the tautening allowance. Preserve every old configuration/run, and record the
 new run separately in `runs/image-grasp-laydown-pilot-drag-v3-20261019/`. Provide
 the replay path relative to project root without opening a viewer pane.
+
+The v3 nominal full-length offset did not achieve the user's centering goal:
+the two footprints ended 9.82 cm and 17.96 cm from the workspace center, despite
+completed 12 cm drags. Preserve this separate development record; its integration
+status is not placement success. One measured centering correction uses the
+airborne hanging drop to estimate trailing extent (factor .43, calibrated on those
+two cases), and the projected Y footprint center to align descent. This is an
+explicit development geometry heuristic, not trained or held-out qualification.
+
+`reference_post_grasp_laydown_v4` retains the full continuous 12 cm drag, fixed Y/Z
+during drag, exact fixture/RNG and all physics. Only the diagonal endpoint is
+computed from the measured hanging geometry. Perform at most one additional
+two-action check, charging the v3 run's 105.808 wall seconds against the same
+one-hour total via `--budget-predecessor`. This is not a resume or reroll of v3.
+Preserve its configuration/run and use
+`runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/` for the correction.
+No further centering revisions or episodes follow from this bounded check.
