@@ -1,5 +1,6 @@
 """One durable, non-resumable development campaign per archived reference fixture."""
 
+import hashlib
 import json
 import os
 import time
@@ -157,8 +158,14 @@ def run_reference_tuning(output_dir, *, fixture_dir, backend="gpu"):
                     "reason": str(exc),
                 }
             )
-    # A claim alongside the immutable fixture prevents a fresh output from extending this campaign.
-    claim = fixture_dir / "reference-leading-v2-claim.json"
+    # Keep historical campaign directories untouched. Recognize the original claim
+    # location too, so migrating its record can never reopen an execution window.
+    claim_directory = fixture_dir.parent / "reference-leading-v2-claims"
+    claim_directory.mkdir(exist_ok=True)
+    key = hashlib.sha256(state["state_hash"].encode()).hexdigest()
+    claim = claim_directory / f"{key}.json"
+    if claim.exists() or (fixture_dir / "reference-leading-v2-claim.json").exists():
+        raise RuntimeError("this fixture already has a terminal or uncertain tuning campaign")
     root.mkdir(parents=True, exist_ok=False)
     try:
         fd = os.open(claim, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
@@ -177,6 +184,11 @@ def run_reference_tuning(output_dir, *, fixture_dir, backend="gpu"):
         )
         stream.flush()
         os.fsync(stream.fileno())
+    directory_fd = os.open(claim_directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
     budget = TuneBudget(root)
     report = {
         "schema": "cloth_fling.reference_tune.v2",

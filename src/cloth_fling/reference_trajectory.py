@@ -64,6 +64,12 @@ class Quintic:
         candidates = [0.0, 1.0] + [r.real for r in roots if abs(r.imag) < 1e-7 and 0 < r.real < 1]
         return float(np.linalg.norm(poly.polyval(candidates, a), axis=0).max())
 
+    def minimum_horizontal_speed(self):
+        a = poly.polyder(self.coefficients[:, 0]) / self.seconds
+        roots = poly.polyroots(poly.polyder(a))
+        candidates = [0.0, 1.0] + [r.real for r in roots if abs(r.imag) < 1e-7 and 0 < r.real < 1]
+        return float(poly.polyval(candidates, a).min())
+
 
 def placement_schedule(config, dt=0.02):
     """Scale the path analytically, preserving C2 joins on the controller clock."""
@@ -101,6 +107,12 @@ def placement_schedule(config, dt=0.02):
             speed / config.max_speed_m_s, np.sqrt(acceleration / config.max_acceleration_m_s2)
         )
         if factor <= 1 + 1e-10:
+            if any(
+                s.minimum_horizontal_speed() < -1e-10
+                or (s.name == "descent" and s.minimum_horizontal_speed() <= 0)
+                for s in segments
+            ):
+                raise ValueError("horizontal reversal violates forward placement")
             # Reserve attach, lift, hold, endpoint hold, release, full unsupported settle.
             fixed = 0.2 + 2 + 3 + sum(durations) + config.endpoint_hold_seconds + 0.2 + 5
             allowance = min(20.0, np.floor((35 - fixed + 1e-9) / dt) * dt)

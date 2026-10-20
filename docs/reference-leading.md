@@ -12,6 +12,7 @@ three quintics transfer horizontally at z=.95, descend forward to x=.75,z=.31,
 and drag to x=.80,z=.31. Internal joins retain positive horizontal velocity and
 zero acceleration. All segments share position, velocity and acceleration at joins.
 Analytical polynomial extrema determine time scaling to .8 m/s and 2 m/s².
+Schedules that reverse horizontal direction are rejected offline.
 Native steps evaluate the polynomial directly. The final attached pose stops, holds
 for one second, releases without changing native velocity and settles unsupported
 for five seconds. Midpoint Y and tautened grasp separation are retained.
@@ -28,7 +29,8 @@ PYTHONPATH=src UV_CACHE_DIR=/tmp/cloth-fling-uv-cache .venv/bin/cloth-fling \
 ```
 
 Use the installed `cloth-fling` entrypoint equivalently.
-A durable exclusive claim beside the archived fixture prevents a new output
+A durable exclusive claim in `runs/reference-leading-v2-claims/`, keyed by the
+fixture state hash, prevents a new output
 directory from extending or replaying this campaign. Existing outputs return their
 terminal report offline; an interrupted report is explicitly uncertain. Intent is
 persisted before restoration or native motion. Failed/uncertain reservations are
@@ -65,3 +67,7 @@ reference tuning replays use wide overhead/oblique poses and never step physics.
 cloth-fling replay runs/reference-leading-v2 --inspect
 cloth-fling replay runs/reference-leading-v2 --output runs/reference-leading-v2-replay --fps 10
 ```
+
+The frozen favorable-grasp trajectory passed all three checks. See the
+[qualification results](reference-leading-results.md) and
+[frozen configuration](../configs/reference-leading-v2-frozen.json).

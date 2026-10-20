@@ -122,7 +122,8 @@ def load_replay(source, *, episode_id=None):
             actions.append(
                 validate_action(
                     ReplayAction(
-                        label=f"{attempt['category']} attempt {attempt['attempt']} candidate {attempt['candidate']}",
+                        label=f"{attempt['category']} {attempt['attempt']}/c{attempt['candidate']} "
+                        + ("PASS" if attempt.get("passed") else "FAIL"),
                         state=state,
                         traces=run["evidence"]["phase_traces"],
                         duration=run["simulated_seconds"],

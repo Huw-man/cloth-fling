@@ -17,6 +17,9 @@ A separate [reference environment](docs/reference-environment.md) adds the suppl
 and learning-ready FlingBot-style RGB grasp action maps. Its bounded entrypoint is
 `cloth-fling reference qualify --output runs/reference-laydown-v1`. Training and
 dynamic-fling reproduction are deferred; this profile does not resume milestone 3.
+The separate [leading-edge development campaign](docs/reference-leading.md) adds
+`reference tune` with a frozen trajectory grid and durable attempt accounting.
+Its [frozen favorable-grasp trajectory passed three confirmations](docs/reference-leading-results.md).
 
 ## Install and check Genesis 1.4.4
 

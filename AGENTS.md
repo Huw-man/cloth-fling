@@ -135,3 +135,9 @@ physics, appearance, mesh, grasp and table settings. Independent native cleanup 
 durable intent records are mandatory; uncertain/failed attempts cannot be resumed.
 See `docs/reference-leading.md`. Previous reference and milestone 3 campaigns remain
 terminal. No learning, varied-grasp evaluation, cloud, hardware or publication.
+
+The leading-edge campaign is now complete: candidate 7 passed development and all
+three frozen confirmations after eight development attempts. The trajectory is in
+`configs/reference-leading-v2-frozen.json`; results are in
+`docs/reference-leading-results.md`. Its fixture claim is terminal. No additional
+motion, changed grasps or new campaign budgets follow from that local qualification.

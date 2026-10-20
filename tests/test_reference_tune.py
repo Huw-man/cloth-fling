@@ -33,10 +33,15 @@ def test_grid_and_all_analytic_extrema_and_continuous_joins():
         (x, t) for x in (0.45, 0.55, 0.35, 0.65) for t in (2, 3, 4, 1.5, 1)
     ]
     for config in grid:
+        if config.transfer_x_m == 0.65 and config.descent_seconds in (3, 4):
+            with pytest.raises(ValueError, match="horizontal reversal"):
+                placement_schedule(config)
+            continue
         segments, schedule = placement_schedule(config)
         assert 0 <= schedule["tauten_allowance_seconds"] <= 20
         assert schedule["maximum_action_seconds"] <= 35 + 1e-8
         for segment in segments:
+            assert segment.minimum_horizontal_speed() >= -1e-10
             assert segment.maximum_norm(1) <= 0.8 + 1e-9
             assert segment.maximum_norm(2) <= 2 + 1e-9
             # Independent dense sample verifies that analytical roots include maxima.
@@ -232,12 +237,15 @@ def archived_campaign(root):
 def test_first_pass_frozen_and_confirmations_never_tune(
     tmp_path, monkeypatch, confirmation_failure
 ):
+    from contextlib import nullcontext
 
     import cloth_fling.reference_tune as tune
     from cloth_fling.sim.reference import ReferenceBackend
 
     archive = tmp_path / "archive"
     archived_campaign(archive)
+    original_files = {p.name: p.read_bytes() for p in archive.iterdir()}
+    monkeypatch.setattr(tune, "reference_lease", lambda root: nullcontext())
 
     class Env:
         def __init__(self, *args, **kwargs):
@@ -314,7 +322,106 @@ def test_first_pass_frozen_and_confirmations_never_tune(
     assert report["frozen_candidate"]["index"] == 0
     assert all(a["candidate"] == 0 for a in report["attempts"])
     assert (tmp_path / "run" / "frozen-trajectory.json").exists()
+    assert {p.name: p.read_bytes() for p in archive.iterdir()} == original_files
     # The exact output returns its terminal report offline.
     assert run_reference_tuning(tmp_path / "run", fixture_dir=archive)["status"] == report["status"]
     with pytest.raises(RuntimeError, match="already has"):
         run_reference_tuning(tmp_path / "another-output", fixture_dir=archive)
+
+
+def test_tuning_replay_preserves_failure_and_rejects_corruption(tmp_path):
+    from test_replay import snapshot, traces
+
+    from cloth_fling.reference_run import save_bundle
+    from cloth_fling.replay import load_replay, sample_traces
+
+    save_bundle(tmp_path, "fixture", snapshot())
+    ref = save_bundle(
+        tmp_path,
+        "attempt-00",
+        {
+            "execution_valid": False,
+            "reason": "placement_far_edge_crossing",
+            "simulated_seconds": 1.0,
+            "evidence": {"phase_traces": traces()},
+        },
+    )
+    (tmp_path / "tune-report.json").write_text(
+        json.dumps(
+            {
+                "attempts": [
+                    {"attempt": 0, "category": "development", "candidate": 0, "outcome": ref}
+                ]
+            }
+        )
+    )
+    actions, origin = load_replay(tmp_path)
+    assert origin["invalid_attempts"] == 1
+    assert actions[0].reason == "placement_far_edge_crossing"
+    assert list(sample_traces(actions[0], 10))[0]["simulated_seconds"] == 0
+    (tmp_path / ref["path"]).write_text("{}")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        load_replay(tmp_path)
+
+
+def test_historical_reference_motion_cannot_extend(tmp_path):
+    from cloth_fling.reference_run import ReferenceBudget, run_reference_qualification
+
+    previous = tmp_path / "old"
+    previous.mkdir()
+    budget = ReferenceBudget(previous)
+    with budget.reserve("diagnostic", 1):
+        pass
+    (previous / "reference-report.json").write_text('{"status":"placement_limitation"}')
+    # This rejection happens before importing/constructing the native scene.
+    with pytest.raises(ValueError, match="terminal motion evidence"):
+        run_reference_qualification(tmp_path / "next", previous=previous)
+    assert not (tmp_path / "next" / "gpu-lease.json").exists()
+    with pytest.raises(FileExistsError):
+        run_reference_qualification(previous)
+
+
+def test_versioned_configuration_matches_executed_grid():
+    from dataclasses import asdict
+    from pathlib import Path
+
+    config = json.loads(
+        (Path(__file__).parents[1] / "configs/reference-leading-v2.json").read_text()
+    )
+    assert config["candidates"] == [asdict(c) for c in candidate_grid()]
+    assert config["limits"] == {
+        "development": 20,
+        "confirmation": 3,
+        "simulator_wall_seconds": 7200,
+        "action_simulated_seconds": 35,
+        "action_wall_seconds": 180,
+    }
+    frozen = json.loads(
+        (Path(__file__).parents[1] / "configs/reference-leading-v2-frozen.json").read_text()
+    )
+    _, schedule = placement_schedule(LeadingTrajectory(**frozen["trajectory"]))
+    assert schedule == frozen["schedule"]
+
+
+def test_terminal_tuning_cli_is_offline(tmp_path):
+    import subprocess
+    import sys
+
+    (tmp_path / "tune-report.json").write_text(
+        '{"status":"placement_limitation","stage_passed":false}'
+    )
+    script = """
+import importlib.abc, sys
+class Guard(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'genesis','torch'}:
+            raise AssertionError('offline execution imported '+fullname)
+sys.meta_path.insert(0, Guard())
+from cloth_fling.cli import main
+assert main(['reference','tune','--output',sys.argv[1],'--fixture','missing']) == 1
+assert 'genesis' not in sys.modules and 'torch' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
