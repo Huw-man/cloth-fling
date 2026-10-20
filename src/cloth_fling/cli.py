@@ -190,6 +190,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reference.add_argument("--backend", choices=("gpu", "cpu"), default="gpu")
 
+    learning = sub.add_parser(
+        "learning-pilot", help="Bounded RGB grasp learning with frozen laydown"
+    )
+    learning.add_argument(
+        "stage_command", choices=("prepare", "collect", "train", "evaluate", "report", "run")
+    )
+    learning.add_argument(
+        "--stage",
+        choices=(
+            "prepare",
+            "exploration",
+            "initial",
+            "refresh",
+            "refreshed",
+            "validation",
+            "test",
+            "replays",
+        ),
+    )
+    learning.add_argument("--output", type=Path, default=Path("runs/image-learning-pilot-v1"))
+
     benchmark = sub.add_parser("benchmark", help="Bounded milestone-3 benchmark")
     benchmark.add_argument("stage", choices=("prepare", "qualify", "pilot", "report"))
     benchmark.add_argument("--output", type=Path, default=Path("runs/milestone3"))
@@ -238,6 +259,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "learning-pilot":
+            from cloth_fling.learning_pilot import main as learning_main
+
+            forwarded = [args.stage_command, "--output", str(args.output)]
+            if args.stage is not None:
+                forwarded += ["--stage", args.stage]
+            return learning_main(forwarded)
         if args.command == "reference":
             from cloth_fling.reference_run import run_reference_qualification
 

@@ -54,6 +54,12 @@ unchanged controller configuration and reviewed native evidence/replay hashes.
 The next pilot will build image-based grasp selection around this fixed continuation;
 training has not started.
 
+The next [bounded image-grasp learning pilot](docs/image-learning-pilot.md) adds an
+RGB value-map learner around that fixed motion, with family-isolated folds, one
+learner-state refresh and a paired three-action test. Use `cloth-fling learning-pilot
+run`; existing/uncertain run roots cannot be resumed. Its eight-hour/432-action
+ceiling is separate from all historical campaigns.
+
 ## Install and check Genesis 1.4.4
 
 Version 0.2.0 pins **Genesis 1.4.4**, the latest stable release checked on 2026-10-19,
