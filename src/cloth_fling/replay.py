@@ -103,6 +103,11 @@ def _diagnostic_fixture(directory, references):
         return decode(document)
 
 
+def _table_height(evidence, state):
+    saved_height = json.loads(str(state["config_json"])).get("table_surface_z_m", 0.0)
+    return float(evidence.get("config", {}).get("table_height_m", saved_height))
+
+
 def load_replay(source, *, episode_id=None):
     """Offline loader. Retain invalid attempts and group dataset rows by episode/step."""
     source = Path(source).resolve()
@@ -215,7 +220,7 @@ def load_replay(source, *, episode_id=None):
                     for name in ("before", "after")
                     if row.get(f"{name}_rgb_path")
                 },
-                table_height_m=evidence.get("config", {}).get("table_height_m", 0.0),
+                table_height_m=_table_height(evidence, state),
             )
             actions.append(validate_action(action))
         origin = {
@@ -248,7 +253,7 @@ def load_replay(source, *, episode_id=None):
                             for name in ("before", "after")
                             if artifacts.get(f"{name}_rgb")
                         },
-                        table_height_m=evidence.get("config", {}).get("table_height_m", 0.0),
+                        table_height_m=_table_height(evidence, state),
                     )
                 )
             )
