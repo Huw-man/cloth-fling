@@ -1,8 +1,8 @@
 # Frozen laydown after grasp
 
-`reference_post_grasp_laydown_v2` corrects the final tug of the user-selected
+`reference_post_grasp_laydown_v3` lengthens the final drag of the user-selected
 continuation from `docs/friction-motion-continued.md`. The operator
-configuration is `configs/reference-post-grasp-laydown-v2-frozen.json`; an identical
+configuration is `configs/reference-post-grasp-laydown-v3-frozen.json`; an identical
 packaged copy lets installed code load it without a checkout or run directory.
 The specification pins controller implementation hashes, the reference physical
 configuration, exact trajectory coefficients/schedule, and the selected run,
@@ -50,9 +50,9 @@ now named `grasp_handoff`, followed by:
 
 - Two-second lift to midpoint X=.10 m, Z=.95 m, preserving midpoint Y.
 - Bounded tautening and three seconds of whole-cloth airborne hold.
-- The six-second C2 diagonal to X=.78 m, Z=.31 m, preserving the tautened span.
-- One-second stabilization, then the existing adaptive tug capped at 2 cm. It may
-  add no pull when the geometric slack target is already satisfied.
+- The six-second C2 diagonal to X=.73 m, Z=.31 m, preserving the tautened span.
+- One-second stabilization, then a continuous two-second C2 drag forward 12 cm
+  to X=.85 m at Z=.31 m. The drag is one-fifth of the 60 cm cloth length.
 - One-second endpoint hold, velocity-preserving release, .2-second release hold
   and five seconds of unsupported settling.
 
@@ -63,7 +63,30 @@ Numerical/domain/deformation/ownership/deadline and native release/cleanup stops
 remain. This is the existing `demonstration` execution policy, now selected as the
 frozen post-grasp continuation; historical qualification defaults are unchanged.
 
-## V2 coordinate correction
+## V3 final drag and placement target
+
+The user requested a meaningful final table drag and a centered cloth afterward.
+V3 replaces the millimetre adaptive tug with a full 12 cm drag over two seconds.
+Body sliding and geometric tautness no longer shorten it. The numerical/domain,
+gross-strain, ownership, deadline, release and cleanup safeguards remain active.
+Placement-quality measurements remain observational; physics is unchanged.
+
+The final leading edge is nominally at X=.85 m: .30 m beyond the tabletop center
+for the .60 m cloth trailing behind it. Subtracting the .12 m drag places the
+diagonal endpoint at X=.73 m. The placement target is the tabletop center (.55, 0) m; report
+the actual final projected bounding-box center and its X/Y error. The target is
+for the cloth footprint, not the grasp point, and is not a claim of exact centering
+for arbitrary grasps or folded shapes.
+
+The continuous quintic drag starts and ends at rest, preserves each pin's Y/Z,
+and has analytic peaks .1125 m/s and .173205 m/s². It uses the same two seconds
+already reserved for the old maximum tug, so the 14.6-second tautening allowance
+and 35 simulated/180 wall-second action bounds remain unchanged. The saved-command
+audit checks the full 12 cm was executed, as well as entry/exit continuity and
+kinematics. The v1/v2 configuration bytes and previous run archives are unchanged;
+reproduce v2 at commit `03787f0`.
+
+## Historical V2 coordinate correction
 
 The curve executor adds the held midpoint Y to its Y-relative segments. The old
 tug supplied world Y instead, adding the offset twice at its first native substep.
@@ -73,8 +96,8 @@ grasps. Scene, friction, geometry, schedule, tug limits and placement policy are
 unchanged. No motion tuning is included.
 
 The v1 configuration and packaged copy retain their original bytes and hashes;
-checkout commit `152333f` to reproduce the old controller. The current API uses v2
-and its updated controller hash. The original favorable demonstration executed no
+checkout commit `152333f` to reproduce the old controller. V2 froze the correction;
+the current v3 API retains it with its updated controller hash. The original favorable demonstration executed no
 tug, so it did not exercise the defect. The first image-grasp pilot did: its two
 unintended Y jumps were 47.24 mm and 106.44 mm. Its recorded integration verdict
 is superseded for motion continuity; its archive remains untouched.

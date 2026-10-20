@@ -261,3 +261,24 @@ ratios were 1.564957 and 1.661032. The 97.480 wall-second total includes replay.
 All 514 CPU tests passed, and the saved-command audit rejects the original jumps.
 No useful general grasp selection or material qualification follows; no further
 episodes or retries are authorized by this completed run.
+
+## Longer centered final drag (new authorization)
+
+The user requested a final drag of about one-fifth/one-quarter of the 60 cm cloth
+length, then specified that the final cloth should be centered on the workspace.
+`reference_post_grasp_laydown_v3` uses a full continuous 12 cm / two-second drag:
+move the diagonal endpoint to X=.73 m and finish the drag at X=.85 m, allowing
+.30 m of trailing cloth to place its nominal center at X=.55 m. Target
+cloth footprint center (.55, 0) m and measure its actual final X/Y offset.
+Do not silently center the grasp point instead of the cloth. Preserve Y/Z during
+the drag and the v2 coordinate correction. Sliding/tautness no longer truncate
+the commanded drag; numerical/domain/gross-strain/ownership/deadline/release and
+cleanup safeguards remain. All physics, contact settings and appearance stay fixed.
+
+Use one fresh bounded two-action image-grasp demonstration with the same fixture
+and RNG 100, within one hour total and 35 simulated/180 wall seconds per action.
+No rerolls, uncertain retries, reset between actions, broader collection or
+training. The full drag uses the existing two-second reservation; do not extend
+the tautening allowance. Preserve every old configuration/run, and record the
+new run separately in `runs/image-grasp-laydown-pilot-drag-v3-20261019/`. Provide
+the replay path relative to project root without opening a viewer pane.

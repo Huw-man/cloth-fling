@@ -22,6 +22,15 @@ class DiagonalTrajectory:
     max_tug_m: float = 0.02
 
     def __post_init__(self):
+        if self.version == "reference_diagonal_drag_v4":
+            if (
+                self.endpoint_x_m,
+                self.diagonal_seconds,
+                self.endpoint_hold_seconds,
+                self.max_tug_m,
+            ) != (0.73, 6.0, 1.0, 0.12):
+                raise ValueError("trajectory differs from the authorized 12 cm final drag")
+            return
         if (
             self.version != "reference_diagonal_v3"
             or self.endpoint_x_m not in (0.78, 0.76, 0.74)
@@ -55,22 +64,36 @@ def diagonal_schedule(config, dt=0.02):
         if factor <= 1 + 1e-10:
             break
         duration = np.ceil(duration * factor / dt) * dt
+    segments = [segment]
+    if config.version == "reference_diagonal_drag_v4":
+        drag = Quintic.between(
+            "tug",
+            2.0,
+            [config.endpoint_x_m, 0, 0.31],
+            [config.endpoint_x_m + config.max_tug_m, 0, 0.31],
+            [0, 0, 0],
+            [0, 0, 0],
+        )
+        if drag.maximum_norm(1) > 0.8 or drag.maximum_norm(2) > 2:
+            raise ValueError("final drag exceeds kinematic bounds")
+        segments.append(drag)
     fixed = 0.2 + 2 + 3 + duration + 1 + 2 + 1 + 0.2 + 5
     allowance = min(20.0, np.floor((35 - fixed + 1e-9) / dt) * dt)
     if allowance < 0:
         raise ValueError("complete diagonal schedule exceeds action budget")
-    return [segment], {
+    return segments, {
         "tauten_allowance_seconds": allowance,
         "maximum_action_seconds": fixed + allowance,
         "reserved_after_tauten_seconds": fixed - 2.2,
-        "peak_speed_m_s": segment.maximum_norm(1),
-        "peak_acceleration_m_s2": segment.maximum_norm(2),
+        "peak_speed_m_s": max(s.maximum_norm(1) for s in segments),
+        "peak_acceleration_m_s2": max(s.maximum_norm(2) for s in segments),
         "segments": [
             {
-                "phase": segment.name,
-                "seconds": duration,
-                "coefficients": segment.coefficients.tolist(),
+                "phase": s.name,
+                "seconds": s.seconds,
+                "coefficients": s.coefficients.tolist(),
             }
+            for s in segments
         ],
     }
 
@@ -199,7 +222,7 @@ class DiagonalMotion(LeadingMotion):
             )
         return p, v, rms
 
-    def perform_tug(self):
+    def prepare_final_contact(self):
         rest = self.env.rest_positions
         for vertex in self.ids:
             target = [rest[:, 0].max() - 0.015, rest[vertex, 1]]
@@ -213,6 +236,20 @@ class DiagonalMotion(LeadingMotion):
         )
         if len(self.body.tug_ids) < 0.25 * self.env._free().sum():
             self.placement_failure("insufficient_deposited_body")
+
+    def perform_drag(self, segment):
+        """Full continuous forward drag; supported-body motion is expected here."""
+        self.prepare_final_contact()
+        start_x = float(self.target[:, 0].mean())
+        self.tug_stop_reason = "continuous_drag"
+        try:
+            self.curve(segment)
+            self.tug_stop_reason = "completed_full_drag"
+        finally:
+            self.tug_distance = float(self.target[:, 0].mean() - start_x)
+
+    def perform_tug(self):
+        self.prepare_final_contact()
         self.tug_stop_reason = "distance_cap"
         for _ in range(20):
             if self.slack_stable >= 5:
@@ -320,9 +357,13 @@ def execute_diagonal_action(
         run.hold("airborne_hold", 3.0)
         if run.hold_clearance <= 0:
             run.placement_failure("airborne_clearance_failure")
-        for segment in segments:
-            run.curve(segment)
-        run.perform_tug()
+        if trajectory.version == "reference_diagonal_drag_v4":
+            run.curve(segments[0])
+            run.perform_drag(segments[1])
+        else:
+            for segment in segments:
+                run.curve(segment)
+            run.perform_tug()
         run.hold("endpoint_hold", trajectory.endpoint_hold_seconds)
         release_sec = env.simulated_time - run.sim_started
         release_ordering = [
