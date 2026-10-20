@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -13,6 +14,7 @@ from cloth_fling.reference_diagonal_motion import (
     DepositedBody,
     DiagonalMotion,
     DiagonalTrajectory,
+    acceptance,
     diagonal_grid,
     diagonal_schedule,
     execute_diagonal_action,
@@ -28,6 +30,103 @@ from cloth_fling.reference_surface import (
     diagonal_scene,
 )
 from cloth_fling.sim.position_contact import position_coulomb
+
+
+class DemonstrationFake(NativeFake):
+    def __init__(self):
+        super().__init__()
+        coupler = SimpleNamespace(
+            take_particle_contact=lambda **kwargs: {"values": np.zeros((len(self.p), 9))}
+        )
+        self.scene = SimpleNamespace(sim=SimpleNamespace(coupler=coupler))
+
+
+@pytest.mark.parametrize("mode", ["qualification", "demonstration"])
+def test_deposited_slip_is_observational_only_in_demonstration(mode):
+    env = DemonstrationFake()
+    run = DiagonalMotion(env, execution_mode=mode)
+    run.ids = env.attach(None)
+    run.target = env.p[list(run.ids)].copy()
+    free = env._free()
+    run.body.landed[free] = True
+    run.body.cohorts = [np.flatnonzero(free)]
+    run.body.anchors = env.p[:, :2] - [0.02, 0]
+    if mode == "qualification":
+        with pytest.raises(RuntimeError, match="deposited_body_sliding"):
+            run.sample("diagonal")
+    else:
+        run.sample("diagonal")
+        assert "deposited_body_sliding" in run.placement_violations
+        assert run.body.main_max_p95 == pytest.approx(0.02)
+
+
+def test_demonstration_finishes_release_and_settling_without_placement_acceptance():
+    class Unsettled(DemonstrationFake):
+        def step(self):
+            super().step()
+            if not self.attached_ids:
+                self.v[:, 0] = 0.02
+
+    env = Unsettled()
+    cleanup = []
+    value = execute_diagonal_action(
+        env,
+        GraspAction(((0, 0), (1, 1))),
+        DiagonalTrajectory(),
+        expected_ids=(0, 20),
+        cleanup_callback=cleanup.append,
+        execution_mode="demonstration",
+    )
+    assert value.execution_valid and value.reason == "completed"
+    assert not value.diagnostics["settled"]
+    assert value.diagnostics["execution_mode"] == "demonstration"
+    assert {
+        "insufficient_progressive_deposition",
+        "insufficient_deposited_body",
+        "settling_timeout",
+    } <= value.evidence["placement_violations"].keys()
+    phases = {p["phase"] for p in value.evidence["phases"]}
+    assert {"diagonal", "endpoint_hold", "release", "settle"} <= phases
+    assert cleanup[0]["passed"] and not env.attached_ids
+    assert value.simulated_seconds <= 35
+    assert not all(acceptance(value).values())
+
+
+@pytest.mark.parametrize("problem", ["nonfinite", "domain", "strain", "ownership", "deadline"])
+def test_demonstration_keeps_physical_execution_stops(problem):
+    env = DemonstrationFake()
+    run = DiagonalMotion(env, execution_mode="demonstration")
+    run.ids = env.attach(None)
+    run.target = env.p[list(run.ids)].copy()
+    expected = {
+        "nonfinite": "nonfinite_state",
+        "domain": "solver_domain_escape",
+        "strain": "gross_edge_ratio",
+        "ownership": "native_ownership_loss",
+        "deadline": "reference_simulated_deadline",
+    }[problem]
+    if problem == "nonfinite":
+        env.v[1, 0] = np.nan
+    elif problem == "domain":
+        env.p += [2, 0, 0]
+    elif problem == "strain":
+        env.p[0, 0] = 1.1
+    elif problem == "ownership":
+        env.attached_ids = ()
+    else:
+        env.simulated_time = 36
+    with pytest.raises(RuntimeError, match=expected):
+        run.sample("diagonal")
+
+
+def test_demonstration_observes_edge_overhang_and_rejects_unknown_mode():
+    env = DemonstrationFake()
+    run = DiagonalMotion(env, execution_mode="demonstration")
+    env.p += [0.4, 0, 0]
+    run.sample("endpoint_hold")
+    assert "placement_far_edge_crossing" in run.placement_violations
+    with pytest.raises(ValueError, match="execution mode"):
+        DiagonalMotion(env, execution_mode="anything")
 
 
 def test_position_friction_changes_same_step_position_and_consistent_velocity():

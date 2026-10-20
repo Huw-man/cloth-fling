@@ -126,9 +126,9 @@ class DepositedBody:
             "tug_drift_p95_m": p95,
         }
 
-    def freeze_tug(self, p, free):
+    def freeze_tug(self, p, free, *, require_body=True):
         self.tug_ids = np.flatnonzero((self.stable >= 5) & free)
-        if len(self.tug_ids) < 0.25 * free.sum():
+        if require_body and len(self.tug_ids) < 0.25 * free.sum():
             raise ReferenceMotionFailure("insufficient_deposited_body")
         self.tug_anchors = p[self.tug_ids, :2].copy()
 
@@ -143,7 +143,10 @@ class DepositedBody:
 
 
 class DiagonalMotion(LeadingMotion):
-    def __init__(self, env):
+    def __init__(self, env, *, execution_mode="qualification"):
+        if execution_mode not in ("qualification", "demonstration"):
+            raise ValueError("unknown diagonal execution mode")
+        self.execution_mode = execution_mode
         self.body = DepositedBody(len(env.rest_positions))
         self.particle_contacts = []
         self.slack = []
@@ -151,7 +154,7 @@ class DiagonalMotion(LeadingMotion):
         self.lines = []
         self.tug_stop_reason = None
         self.tug_distance = 0.0
-        super().__init__(env)
+        super().__init__(env, stop_on_placement_failure=execution_mode == "qualification")
 
     def sample(self, phase):
         p, v, rms = super().sample(phase)
@@ -161,7 +164,7 @@ class DiagonalMotion(LeadingMotion):
         )
         contacts = contact["values"][:, 0] > 0
         if phase == "airborne_hold" and contacts.any():
-            raise ReferenceMotionFailure("airborne_contact_regression")
+            self.placement_failure("airborne_contact_regression")
         if self.ids:
             metrics = self.body.update(
                 p, v, self.env._free(), contacts, self.target.mean(axis=0), phase
@@ -172,14 +175,14 @@ class DiagonalMotion(LeadingMotion):
                 and self.body.at_height is not None
                 and self.body.at_height < 0.25
             ):
-                raise ReferenceMotionFailure("insufficient_progressive_deposition")
+                self.placement_failure("insufficient_progressive_deposition")
             if phase == "diagonal" and self.body.main_max_p95 > 0.01:
-                raise ReferenceMotionFailure("deposited_body_sliding")
+                self.placement_failure("deposited_body_sliding")
             if (
                 phase in ("diagonal", "tug", "endpoint_hold")
                 and self.edge_crossings[-1]["crossed_vertices"].size
             ):
-                raise ReferenceMotionFailure("placement_far_edge_crossing")
+                self.placement_failure("placement_far_edge_crossing")
         if self.lines:
             ratios = []
             for indices, weights in self.lines:
@@ -203,17 +206,24 @@ class DiagonalMotion(LeadingMotion):
             far = int(np.argmin(np.linalg.norm(rest[:, :2] - target, axis=1)))
             self.lines.append(material_line(rest, self.env.faces, rest[vertex], rest[far]))
         self.hold("pre_tug_stabilize", 1.0)
-        self.body.freeze_tug(self.env.get_positions(), self.env._free())
+        self.body.freeze_tug(
+            self.env.get_positions(),
+            self.env._free(),
+            require_body=self.stop_on_placement_failure,
+        )
+        if len(self.body.tug_ids) < 0.25 * self.env._free().sum():
+            self.placement_failure("insufficient_deposited_body")
         self.tug_stop_reason = "distance_cap"
         for _ in range(20):
             if self.slack_stable >= 5:
                 self.tug_stop_reason = "geometric_slack_removed"
                 break
             p = self.env.get_positions()
-            delta = np.linalg.norm(p[self.body.tug_ids, :2] - self.body.tug_anchors, axis=1)
-            if np.median(delta) >= 0.001 or np.quantile(delta, 0.95) >= 0.003:
-                self.tug_stop_reason = "incipient_body_slip"
-                break
+            if len(self.body.tug_ids):
+                delta = np.linalg.norm(p[self.body.tug_ids, :2] - self.body.tug_anchors, axis=1)
+                if np.median(delta) >= 0.001 or np.quantile(delta, 0.95) >= 0.003:
+                    self.tug_stop_reason = "incipient_body_slip"
+                    break
             start = self.target.mean(axis=0)
             self.curve(
                 Quintic.between("tug", 0.1, start, start + [0.001, 0, 0], [0, 0, 0], [0, 0, 0])
@@ -260,11 +270,13 @@ def campaign_stopping(outcome):
     )
 
 
-def execute_diagonal_action(env, action, trajectory, *, expected_ids, cleanup_callback):
+def execute_diagonal_action(
+    env, action, trajectory, *, expected_ids, cleanup_callback, execution_mode="qualification"
+):
     segments, schedule = diagonal_schedule(trajectory, env.config.controller_dt)
     before = env.observe()
     coverage_before, area_before, flat_area = env.coverage()
-    run = DiagonalMotion(env)
+    run = DiagonalMotion(env, execution_mode=execution_mode)
     reason, failure, settled, cleanup = "completed", None, False, {}
     terminal_state, after = None, None
     release_ordering = []
@@ -283,7 +295,7 @@ def execute_diagonal_action(env, action, trajectory, *, expected_ids, cleanup_ca
         run.tauten_cloth(schedule["tauten_allowance_seconds"])
         run.hold("airborne_hold", 3.0)
         if run.hold_clearance <= 0:
-            raise ReferenceMotionFailure("airborne_clearance_failure")
+            run.placement_failure("airborne_clearance_failure")
         for segment in segments:
             run.curve(segment)
         run.perform_tug()
@@ -296,7 +308,7 @@ def execute_diagonal_action(env, action, trajectory, *, expected_ids, cleanup_ca
             np.linalg.norm(env.get_velocities()[list(run.ids)], axis=1).max()
         )
         if run.release_tcp_speed > 0.01:
-            raise ReferenceMotionFailure("release_not_near_rest")
+            run.placement_failure("release_not_near_rest")
         run.native_capture("before_release")
         env.release()
         if (
@@ -314,7 +326,7 @@ def execute_diagonal_action(env, action, trajectory, *, expected_ids, cleanup_ca
             stable = stable + 1 if rms <= 0.01 else 0
         settled = stable >= 5
         if not settled:
-            raise ReferenceMotionFailure("settling_timeout")
+            run.placement_failure("settling_timeout")
     except Exception as exc:
         reason, failure = str(exc), f"{type(exc).__name__}: {exc}"
         try:
@@ -366,7 +378,7 @@ def execute_diagonal_action(env, action, trajectory, *, expected_ids, cleanup_ca
         and cleanup["passed"]
         and terminal_state is not None
         and after is not None
-        and settled
+        and (settled or execution_mode == "demonstration")
     )
     return ActionOutcome(
         before=before,
@@ -383,6 +395,7 @@ def execute_diagonal_action(env, action, trajectory, *, expected_ids, cleanup_ca
         simulated_seconds=env.simulated_time - run.sim_started,
         wall_seconds=time.monotonic() - run.started,
         diagnostics={
+            "execution_mode": execution_mode,
             "settled": settled,
             **run.body.metrics(len(env.rest_positions) - 2),
             "tug_stop_reason": run.tug_stop_reason,
@@ -406,6 +419,7 @@ def execute_diagonal_action(env, action, trajectory, *, expected_ids, cleanup_ca
             ),
         },
         evidence={
+            "placement_violations": run.placement_violations,
             "cleanup": cleanup,
             "failure": failure,
             "phases": run.phases,

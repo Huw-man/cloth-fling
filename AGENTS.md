@@ -179,3 +179,13 @@ No tuning, retry or confirmation was performed. Preserve its terminal ledger and
 failure under `runs/friction-motion-demo-20261019/`; see
 `docs/friction-motion-demo.md`. Provide replay file paths without opening viewer
 panes; the user handles remote terminal-browser viewing with its own `--ssh` flag.
+
+The user subsequently removed placement-quality hard requirements for exploratory
+simulation: continue while physical execution remains stable. Demonstration mode
+now logs cloth drift/deposition/overhang/release-speed/settling violations rather
+than aborting for them. Numerical, domain, gross-deformation, ownership, deadline,
+release-velocity and cleanup stops remain. Qualification-mode defaults and all old
+terminal evidence remain unchanged. One newly authorized bounded demonstration
+may execute with this mode, using the same physics, fixture, pins and trajectory;
+no tuning, retries or qualification claims. File handoffs must use project-relative
+paths and must not open viewer panes.

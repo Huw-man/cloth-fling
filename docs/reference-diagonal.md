@@ -99,6 +99,27 @@ saved geometry only and never step physics. Report a failure as a failure, even 
 final projected coverage is high. Open the successful replay only if every gate and
 all three confirmations pass.
 
+## Exploratory demonstration mode
+
+Following the user's request to continue stable simulation past cloth slip,
+`execute_diagonal_action(..., execution_mode="demonstration")` records placement
+quality failures without aborting the action. Deposited-body drift, insufficient
+deposition, edge overhang, airborne clearance, release speed and incomplete
+settling remain measured. Their first violation times are archived in
+`evidence.placement_violations`, and the original acceptance assessment is retained.
+The requested motion can proceed through release and the full settling window
+despite those quality results. The adaptive small tug retains its distance cap
+and geometric/slip-based endpoint selection; it no longer requires a quarter of
+the cloth to qualify as a settled support cohort before the action can continue.
+
+Nonfinite state, solver-domain escape, gross deformation, native ownership loss,
+action deadlines, release-velocity corruption and failed cleanup still stop
+execution. Physics and the normal timestep are unchanged. The known half-timestep
+contact discrepancy remains unresolved, so demonstrations do not establish contact
+qualification. The default `qualification` mode and historical campaign terminal
+behavior retain their original stops. This is an explicit execution-mode change,
+not a changed friction coefficient or a rewritten qualification result.
+
 ## Current result
 
 The first campaign passed ten contact checks and stopped at an airborne-fixture

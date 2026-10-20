@@ -11,12 +11,21 @@ from cloth_fling.reference_trajectory import leading_fraction, placement_schedul
 
 
 class LeadingMotion(_Motion):
-    def __init__(self, env, callback=None):
+    def __init__(self, env, callback=None, *, stop_on_placement_failure=True):
         super().__init__(env, ReferenceMotionConfig(), callback)
+        self.stop_on_placement_failure = stop_on_placement_failure
+        self.placement_violations = {}
         self.native_states = []
         self.ordering = []
         self.edge_crossings = []
         self.native_capture("time_zero")
+
+    def placement_failure(self, reason):
+        if self.stop_on_placement_failure:
+            raise ReferenceMotionFailure(reason)
+        self.placement_violations.setdefault(
+            reason, {"first_simulated_seconds": self.env.simulated_time - self.sim_started}
+        )
 
     def native_capture(self, name):
         state = self.env.snapshot()
@@ -66,7 +75,7 @@ class LeadingMotion(_Motion):
                 leading_fraction=fraction, edge_crossing_count=int(crossing.sum())
             )
         if phase in ("transfer", "descent", "drag", "endpoint_hold") and crossing.any():
-            raise ReferenceMotionFailure("placement_far_edge_crossing")
+            self.placement_failure("placement_far_edge_crossing")
         return p, v, rms
 
     def curve(self, segment):
