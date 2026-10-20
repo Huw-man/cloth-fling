@@ -122,6 +122,16 @@ class Journal:
     def operation(self, stage, kind):
         self.stage, self.kind = stage, kind
         self.check()
+        if read(self.root, "protocol.json") != PROTOCOL:
+            raise ValueError("single-reset protocol changed")
+        if read(self.root, "implementation.json") != pilot.implementation_identity():
+            raise ValueError("single-reset implementation changed")
+        for completed in self.document["stages"]:
+            if completed["status"] == "complete":
+                for name, expected in completed["outputs"].items():
+                    path = relative_path(self.root, name)
+                    if not path.exists() or file_sha256(path) != expected:
+                        raise ValueError(f"sealed output changed before dependent stage: {name}")
         claim(self.root / "stage-intents" / f"{stage}.json", {"stage": stage, "kind": kind})
         entry = {"stage": stage, "kind": kind, "status": "claimed_never_retry", "outputs": {}}
         self.document["stages"].append(entry)

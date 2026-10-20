@@ -194,6 +194,23 @@ def test_time_and_action_budgets_reject_before_claim(tmp_path):
         journal.claim_action("confirmation", 1)
 
 
+@pytest.mark.parametrize("changed", ["protocol", "implementation", "sealed_output"])
+def test_identity_changes_block_dependent_stage_before_claim(tmp_path, monkeypatch, changed):
+    journal = overfit.Journal(tmp_path / "run")
+    with journal.operation("prepare", "prepare") as outputs:
+        overfit.write(journal.root, "fixture-proof.json", {"valid": True})
+        journal.seal(outputs, journal.root / "fixture-proof.json")
+    if changed == "implementation":
+        monkeypatch.setattr(overfit.pilot, "implementation_identity", lambda: {"changed": True})
+    else:
+        name = "protocol.json" if changed == "protocol" else "fixture-proof.json"
+        overfit.write(journal.root, name, {"changed": True})
+    with pytest.raises(ValueError, match="changed"):
+        with journal.operation("exploration", "collection"):
+            pytest.fail("dependent work started")
+    assert not (journal.root / "stage-intents" / "exploration.json").exists()
+
+
 def test_uncertain_attempt_accounted_and_existing_run_never_opens_scene(tmp_path):
     journal = overfit.Journal(tmp_path / "run")
     overfit.claim(journal.root / "action-intents" / "0000.json", {"orphan": True})
