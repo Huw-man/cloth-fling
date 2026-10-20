@@ -5,8 +5,34 @@ continuation from `docs/friction-motion-continued.md`. The operator
 configuration is `configs/reference-post-grasp-laydown-v4-frozen.json`; an identical
 packaged copy lets installed code load it without a checkout or run directory.
 The specification pins controller implementation hashes, the reference physical
-configuration, exact trajectory coefficients/schedule, and the selected run,
-outcome and replay hashes. Changes require a new version.
+configuration, phase schedule and nominal trajectory template. Measured geometry
+determines each action's actual endpoints and coefficients, which are recorded
+with the execution. Changes to the frozen controller require a new version.
+
+## Approved training-pilot baseline
+
+The user approved the centered v4 two-action demonstration as the motion baseline
+for the next end-to-end training pilot. The selection record is
+`configs/end-to-end-pilot-baseline-v1.json`. It pins the unchanged v4 configuration
+and the exact reviewed report, verification, dataset manifest, fixture and replay
+by SHA-256. This separate record supersedes earlier demonstration selections for
+future pilot work without rewriting the configuration's historical provenance.
+
+The reviewed replay is
+`runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/replay/combined.mp4`.
+All paths in the selection record are relative to the project root. Existing run
+directories remain terminal; selecting this baseline does not resume them.
+
+The next slice builds the RGB-to-grasp-to-laydown loop around this fixed
+continuation. Learning targets grasp selection; native hard-pin attachment,
+measured centering and the full 12 cm drag remain execution components. Keep
+privileged geometry out of learned RGB inputs, preserve evolving state between
+valid actions, and retain signed coverage changes and failures. The training
+protocol, reset/split choices and bounded execution budget remain to be specified;
+no training or new collection was performed to save this baseline.
+
+This is a user-approved local motion, with the development evidence and material
+limitations below. It does not confer held-out or learned-policy qualification.
 
 ## Handoff
 

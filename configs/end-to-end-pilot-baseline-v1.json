@@ -1,0 +1,57 @@
+{
+  "schema": "cloth_fling.pilot_baseline.v1",
+  "status": "user_approved_motion_baseline",
+  "selection": "User approved the centered v4 two-action demonstration as the trajectory to build upon for the end-to-end training pilot.",
+  "continuation": {
+    "version": "reference_post_grasp_laydown_v4",
+    "entrypoint": "cloth_fling.frozen_laydown.execute_frozen_laydown",
+    "configuration": {
+      "path": "configs/reference-post-grasp-laydown-v4-frozen.json",
+      "sha256": "6a5caa7c01afa0735882b575c197c513556f7e8903fd23e8fe7c8d6334278339"
+    },
+    "freeze_scope": "Controller, phase timing, 12 cm drag, measured hanging-geometry centering rule, scene and contact physics; per-action measured endpoints and polynomial coefficients remain execution artifacts.",
+    "handoff": "Adopt two existing native single-vertex pins in negative-to-positive world Y order, retaining the original GraspAction; no reattachment or reset."
+  },
+  "reviewed_evidence": {
+    "native_code_commit": "000f67a5d5410423d63f4a20ebda0ff4603b2734",
+    "run": "runs/image-grasp-laydown-pilot-centered-drag-v4-20261019",
+    "report": {
+      "path": "runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/pilot-report.json",
+      "sha256": "23a4a82d64473980480b90b9dc139af06cc4266d113c67218e90c2c570e1d80d"
+    },
+    "verification": {
+      "path": "runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/verification.json",
+      "sha256": "62edf7f0c4c12f16929c922044186e0e97560bc38cc8f74aa126457ade018ffe"
+    },
+    "dataset_manifest": {
+      "path": "runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/dataset/manifest.json",
+      "sha256": "daaad2e79a7df4584d3cdf174ab60eac6c7777d89d9a53e2d6f8646e41184d10"
+    },
+    "fixture_metadata": {
+      "path": "runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/fixture.json",
+      "sha256": "0b85385b6a35d87c50aeadd089c2c059eb2905a88f8ef4019b0616047662f5ad"
+    },
+    "fixture_arrays": {
+      "path": "runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/fixture.npz",
+      "sha256": "f9af439230c2dfd7b6084c973c56a0ccf2e9ac880375888f460fc221267889be"
+    },
+    "replay": {
+      "path": "runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/replay/combined.mp4",
+      "sha256": "2143f37e78cac7791ccf646c53fe6416239d52b4465fde9024b68d2c251fb437"
+    },
+    "scope": "One development episode, two evolving image-selected assisted grasps, no reset between actions; integration and continuity passed. The run is terminal."
+  },
+  "pilot_starting_contract": {
+    "loop": "RGB observation -> grasp selection -> native assisted attachment -> frozen v4 continuation -> next RGB observation",
+    "learning_target": "Image-based grasp selection with this post-grasp controller fixed",
+    "privileged_geometry": "Execution, feasibility and evaluation artifacts only; never learned RGB input",
+    "episode_continuity": "No reset between valid actions; retain failures and signed coverage gains",
+    "training_status": "Not started; training-pilot protocol and bounded execution budget remain to be specified"
+  },
+  "evidence_limits": [
+    "User selection is motion approval, not diverse-reset, held-out or learned-policy qualification.",
+    "Full-episode random-grasp coverage decreased despite positive drag-only gains.",
+    "Material fidelity remains unqualified; the known half-timestep friction discrepancy remains unresolved.",
+    "Native hard pins are assisted attachment, not physical pinch grasp evidence."
+  ]
+}
