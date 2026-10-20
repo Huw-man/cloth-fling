@@ -271,10 +271,10 @@ def fixture_cases():
     ]
 
 
-def prepare(env, journal):
+def prepare(env, journal, *, cases=None):
     root = journal.root
     records = []
-    for case in fixture_cases():
+    for case in fixture_cases() if cases is None else cases:
         journal.check(reserve=COLLECTION_RESERVE_SECONDS)
         folder = root / "fixtures" / case["id"]
         claim(folder / "intent.json", case)
@@ -353,16 +353,16 @@ def prepare(env, journal):
     )
 
 
-def fixtures(root):
+def fixtures(root, *, expected_cases=None):
     prepare_entry = read(root, "ledger.json")["stages"][0]
     if prepare_entry["status"] != "complete" or prepare_entry["outputs"][
         "fixtures-manifest.json"
     ] != file_sha256(Path(root) / "fixtures-manifest.json"):
         raise ValueError("frozen fixture manifest changed or preparation is incomplete")
     manifest = read(root, "fixtures-manifest.json")
-    expected = fixture_cases()
+    expected = fixture_cases() if expected_cases is None else expected_cases
     records = manifest["cases"]
-    if manifest["config_sha256"] != CONFIG_SHA256 or len(records) != 21:
+    if manifest["config_sha256"] != CONFIG_SHA256 or len(records) != len(expected):
         raise ValueError("incomplete or incompatible frozen fixture set")
     states, split_hashes = {}, {}
     for case, identity in zip(records, expected, strict=True):

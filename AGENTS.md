@@ -385,3 +385,17 @@ match. Cleanup passed. Reporting fixes preserve evidence and original errors but
 do not reopen or rerun the campaign. See `docs/single-reset-overfit-results.md` and
 `runs/single-reset-overfit-v1/failure-analysis.json`. No further physical actions,
 training or campaign restart are authorized by the unused budget.
+
+## Near-half-fold family pilot (new authorization)
+
+The user authorized implementation and execution of `docs/near-half-fold-pilot.md`:
+twelve fresh near-half-fold fixtures (six train, two validation, four test), 48
+training-collection episodes, eight validation episodes and sixteen paired test
+episodes. Stop at settled contained .80 coverage, with at most three actions per
+episode. Retain frozen v4 motion/contact, RGB-only signed-gain learning, two fixed
+2,000-step fits, split isolation, no resets inside episodes and all failed evidence.
+Use `runs/near-half-fold-pilot-v1/`, at most 216 attempts and six hours execution,
+reserving the final two hours from preparation/collection. Use an isolated Herdr
+worktree, audited local integration and the exclusive RTX 5080 lease. No uncertain
+retries, fixture substitutions, physics tuning or extensions. Historical campaigns
+remain terminal. Replays are delivered as project-relative paths without panes.
