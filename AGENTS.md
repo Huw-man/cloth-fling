@@ -299,3 +299,12 @@ one-hour total via `--budget-predecessor`. This is not a resume or reroll of v3.
 Preserve its configuration/run and use
 `runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/` for the correction.
 No further centering revisions or episodes follow from this bounded check.
+
+The v4 check is complete and terminal. Both full 12 cm drags passed continuity
+and bounds, with settled final footprint centers 1.38 cm and 3.20 cm from the
+workspace center. Drag-only coverage gains were +.110200 and +.043967, but the
+full random-grasp episode still reduced coverage .993333 → .573267 → .418417.
+Peak local edge ratios 1.684783 and 2.063633 remain material limitations. The v3
+development plus v4 correction charged 192.471 wall seconds combined; no further
+episodes or tuning follow from remaining budget. Native ownership, release,
+cleanup, exact continuity, artifact/replay auditing and 527 CPU tests passed.

@@ -59,6 +59,49 @@ hardware work are deferred. All historical campaigns remain terminal.
 
 ## V4 measured centering correction
 
+The final bounded check completed both full 12 cm drags with native cleanup and
+exact state continuity. The final cloth footprint was **1.38 cm** and **3.20 cm**
+from the workspace center. Both cloth states settled. The measured correction
+used 86.663 wall seconds including replay; combined with the preserved v3
+centering miss, the same one-hour development ceiling was charged **192.471 s**.
+No further revisions, rerolls or native episodes ran.
+
+| Measurement | Action 0 | Action 1 |
+| --- | --- | --- |
+| Native grasp IDs in execution order | 1568, 1914 | 1325, 127 |
+| Planned pre-drag midpoint X, m | .641358 | .674284 |
+| Planned post-drag midpoint X, m | .761358 | .794284 |
+| Smooth diagonal Y correction, m | +.049064 | +.057309 |
+| Executed final drag, m | .120000 | .120000 |
+| Coverage immediately before → after drag | .465550 → .575750 | .374450 → .418417 |
+| Drag-only coverage change | +.110200 | +.043967 |
+| Final settled coverage | .573267 | .418417 |
+| Final cloth footprint center XY, m | (.536365, .001888) | (.533400, .027395) |
+| Distance from workspace center, m | .013765 | .032032 |
+| Final whole-cloth RMS speed, m/s | .001226 | .003502 |
+| Whole-cloth airborne hold, s | 3 | 3 |
+| Minimum airborne clearance, m | .148298 | .069337 |
+| Final tabletop containment | 100% | 100% |
+| Peak material edge ratio | 1.684783 | 2.063633 |
+
+The longer drag increased coverage during both drags, but the complete random-
+grasp episode still reduced coverage: .993333 → .573267 → .418417. This verifies
+local centering and the requested motion, not useful general grasp selection.
+Material deformation remains substantial and unqualified; physics was unchanged.
+
+All 527 CPU tests passed (eight GPU tests deselected), with 46 focused tests on
+integrated main. Saved-state auditing confirmed finite geometry/velocity, retained
+ownership, zero release-velocity error, dissipative contact work and no friction
+on pins. Both command audits verified fixed drag Y/Z, the full 12 cm distance,
+maximum sampled speed .112470 m/s and acceleration .173147 m/s². All replay files
+fully decoded: 459 frames at 10 fps, 45.9 seconds. Sampled frames were inspected
+without a viewer. The lease was released and no GPU jobs remained.
+
+The native source commit is `000f67a`. All configuration, state, trajectory,
+selection, parent-budget receipt, independent cleanup, CPU/native logs, report,
+verification and replay evidence are in
+`runs/image-grasp-laydown-pilot-centered-drag-v4-20261019/`. This record is terminal.
+
 The v3 development episode completed the longer drags but failed to center the
 folded cloth: final footprint centers were (.644077, −.028072) and
 (.696095, −.104403) m. The actual drags increased instantaneous projected coverage

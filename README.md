@@ -37,7 +37,7 @@ The user-selected [frozen post-grasp laydown](docs/frozen-laydown.md) now adopts
 already-held native grasp and runs this motion without reattachment or a reset.
 Its current configuration is `configs/reference-post-grasp-laydown-v4-frozen.json`,
 with a 12 cm final drag and a measured-geometry diagonal targeting a centered cloth
-footprint. It retains the off-center tug correction; v1/v2 remain historical.
+footprint. It retains the off-center tug correction; v1–v3 remain historical.
 The [two-action image-grasp integration pilot](docs/image-grasp-pilot.md) completed
 the selection/attachment/laydown loop twice without resetting. Continuity passed;
 both random grasps reduced coverage and the second action remained unsettled.
@@ -45,6 +45,9 @@ The original verdict missed lateral jumps in the final tug and is superseded for
 motion continuity. The corrected v2 repeat passed both tug-command audits and
 settled after both actions; coverage was .993333 → .449317 → .625150. General
 grasp selection and material fidelity remain unqualified.
+The latest longer-drag check completed both 12 cm drags and settled 1.38 cm and
+3.20 cm from the workspace center. Drag-only coverage improved by .110200 and
+.043967; overall random-grasp coverage was .993333 → .573267 → .418417.
 
 ## Install and check Genesis 1.4.4
 
