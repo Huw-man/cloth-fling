@@ -214,6 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
     overfit = sub.add_parser("learning-overfit", help="Overfit one reset within three actions")
     overfit.add_argument("stage_command", choices=("run", "report"))
     overfit.add_argument("--output", type=Path, default=Path("runs/single-reset-overfit-v1"))
+    overfit.add_argument("--coverage-target", type=float, choices=(0.8, 0.98), default=0.8)
 
     benchmark = sub.add_parser("benchmark", help="Bounded milestone-3 benchmark")
     benchmark.add_argument("stage", choices=("prepare", "qualify", "pilot", "report"))
@@ -266,7 +267,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "learning-overfit":
             from cloth_fling.learning_overfit import main as overfit_main
 
-            return overfit_main([args.stage_command, "--output", str(args.output)])
+            return overfit_main(
+                [
+                    args.stage_command,
+                    "--output",
+                    str(args.output),
+                    "--coverage-target",
+                    str(args.coverage_target),
+                ]
+            )
         if args.command == "learning-pilot":
             from cloth_fling.learning_pilot import main as learning_main
 

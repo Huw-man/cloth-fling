@@ -2,9 +2,23 @@
 
 The user authorized one bounded local campaign to determine whether the current RGB
 grasp learner and approved v4 continuation can flatten one exact reset within three
-actions. The target is normalized projected coverage >=.98, complete tabletop
+actions. The primary target is normalized projected coverage >=.80, complete tabletop
 containment, native release/cleanup, and the existing endpoint settlement criterion:
 whole-cloth RMS speed <=.01 m/s for five consecutive controller samples.
+
+The user lowered the primary milestone from .98 to .80 while the first campaign
+was running. Its original `single_reset_overfit_v1` protocol and .98 execution
+stopping rule remain immutable. Report the first qualifying .80 action within each
+saved episode separately, including when later recorded actions lost coverage or
+failed settling. This retrospective assessment does not imply that the executed
+episode stopped at .80 or that a collected example qualifies the learned policy.
+All three frozen greedy/confirmation episodes are still required for qualification.
+The amendment grants no additional actions, wall time, or campaign restart.
+
+Future runs use the separately identified `single_reset_overfit_v2_80` protocol and
+stop at .80. `--coverage-target .98` preserves the historical protocol for explicit
+reproduction in a new authorized output root. Both versions retain the same
+immediate-coverage-gain reward, motion, physics and fixed schedule below.
 
 Use archived `fold-50-+00` from the completed image-learning pilot, starting at
 .48615 coverage. Copy and hash-verify its complete schema-2 fixture; never regenerate,
@@ -63,6 +77,10 @@ before acquiring a lease or opening a scene. There is no physical-resume command
 `report` is read-only, works without Genesis or Torch, and cannot reopen the run.
 Immutable intents precede actions; fixture, source, controller, dataset and checkpoint
 identities are recorded. Independent cleanup is saved before reporting.
+The default root stays terminal once created; changing the coverage target cannot
+reopen it. `report` reads each run's stored execution target and also includes the
+primary .80 milestone. Preserve the original executed report when writing the
+amended assessment to `primary-milestone-report.json`.
 
 Evidence includes action-wise coverage, predicted and observed gains, failures,
 native state continuity, contact accounting and strain. On success, retain the frozen
