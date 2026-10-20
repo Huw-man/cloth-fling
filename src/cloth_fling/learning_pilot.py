@@ -129,6 +129,12 @@ class Journal:
             raise ValueError("pilot protocol changed")
         if read(root, "implementation.json") != implementation_identity():
             raise ValueError("pilot source changed after the experiment was claimed")
+        intents = [
+            read(root, str(p.relative_to(self.root)))
+            for p in sorted((self.root / "action-intents").glob("*.json"))
+        ]
+        if intents != self.document["actions"]:
+            raise RuntimeError("uncertain action intent/ledger gap; physical resume is forbidden")
         for stage in self.document["stages"]:
             if stage["status"] == "complete":
                 for name, expected in stage["outputs"].items():
@@ -797,15 +803,19 @@ def replay_stage(journal):
     write(journal.root, "replays.json", videos)
 
 
-def report(root):
+def report(root, *, verify=True):
     """Offline reporting cannot reopen claims or turn a stopped pilot into success."""
     root = Path(root)
+    started = time.monotonic()
     ledger = read(root, "ledger.json")
+    intent_paths = sorted((root / "action-intents").glob("*.json"))
+    intents = [read(root, str(p.relative_to(root))) for p in intent_paths]
     result = {
         "status": ledger["status"],
-        "pipeline_complete": ledger["status"] == "complete",
+        "pipeline_complete": ledger["status"] == "complete" and verify,
+        "verification_completed": verify,
         "charged_seconds": ledger["charged_seconds"],
-        "claimed_actions": len(ledger["actions"]),
+        "claimed_actions": max(len(intents), len(ledger["actions"])),
         "action_limit": ACTION_LIMIT,
         "wall_limit_seconds": LIMIT_SECONDS,
         "frozen_config_sha256": CONFIG_SHA256,
@@ -817,7 +827,7 @@ def report(root):
         result["uncertain_elapsed_seconds"] = max(
             0, time.time() - ledger["stages"][-1]["started_unix"]
         )
-    integrity_errors = []
+    integrity_errors = [] if intents == ledger["actions"] else ["action intent/ledger mismatch"]
     episode_results = []
     for stage in ledger["stages"]:
         if stage["status"] == "complete":
@@ -829,8 +839,9 @@ def report(root):
         episode_results.append(episode_result)
         dataset = path.parent / "dataset"
         if (
-            file_sha256(dataset / "manifest.json") != episode_result["dataset_manifest_sha256"]
-            or not verify_dataset(dataset)["valid"]
+            not (dataset / "manifest.json").exists()
+            or file_sha256(dataset / "manifest.json") != episode_result["dataset_manifest_sha256"]
+            or (verify and not verify_dataset(dataset)["valid"])
         ):
             integrity_errors.append(str(dataset.relative_to(root)))
     result["artifact_integrity_errors"] = integrity_errors
@@ -864,6 +875,16 @@ def report(root):
     )
     if (root / "replays.json").exists():
         result["replays"] = read(root, "replays.json")
+    result["report_wall_seconds"] = time.monotonic() - started
+    result["cumulative_execution_seconds"] = (
+        ledger["charged_seconds"] + result["report_wall_seconds"]
+    )
+    if result["cumulative_execution_seconds"] > LIMIT_SECONDS:
+        result.update(
+            status="incomplete_budget_exhausted", pipeline_complete=False, behavior_positive=False
+        )
+    if not verify and result["status"] == "complete":
+        result["status"] = "incomplete_reporting"
     write(root, "pilot-report.json", result)
     return result
 
@@ -873,7 +894,11 @@ def execute_stage(root, stage, *, backend_factory=None):
     with (root / "execution.lock").open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         journal = Journal(root)
-        with journal.operation(stage), reference_lease(root):
+        with (
+            journal.operation(stage),
+            reference_lease(root),
+            _reservation_deadline(time.monotonic() + journal.remaining()),
+        ):
             if stage in ("initial", "refreshed"):
                 fit_stage(journal, stage)
                 return
@@ -924,16 +949,23 @@ def main(argv=None):
         parser.error("choose the matching --stage")
     if args.command in ("prepare", "run"):
         initialize(args.output)
+    report_started = False
     try:
         if args.command != "report":
             for stage in stages:
                 execute_stage(args.output, stage)
-        result = report(args.output)
+        remaining = LIMIT_SECONDS - read(args.output, "ledger.json")["charged_seconds"]
+        report_started = True
+        with _reservation_deadline(time.monotonic() + max(0.01, remaining)):
+            result = report(args.output)
         print(json.dumps(result, indent=2))
         return 0 if result["pipeline_complete"] or result["status"] == "between_stages" else 1
     except Exception as exc:
-        if (args.output / "ledger.json").exists():
-            report(args.output)
+        if (args.output / "ledger.json").exists() and (
+            report_started or read(args.output, "ledger.json")["status"] == "incomplete"
+        ):
+            write(args.output, "command-failure.json", {"error": f"{type(exc).__name__}: {exc}"})
+            report(args.output, verify=False)
         print(f"learning pilot stopped: {type(exc).__name__}: {exc}", flush=True)
         return 1
 

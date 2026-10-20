@@ -28,8 +28,10 @@ continuation. Learning targets grasp selection; native hard-pin attachment,
 measured centering and the full 12 cm drag remain execution components. Keep
 privileged geometry out of learned RGB inputs, preserve evolving state between
 valid actions, and retain signed coverage changes and failures. The training
-protocol, reset/split choices and bounded execution budget remain to be specified;
-no training or new collection was performed to save this baseline.
+protocol, reset/split choices and bounded execution budget were specified separately
+in `docs/image-learning-pilot.md`. No training or new collection was performed by
+the baseline freeze itself; the subsequent bounded learning experiment is recorded
+in `docs/image-learning-pilot-results.md`.
 
 This is a user-approved local motion, with the development evidence and material
 limitations below. It does not confer held-out or learned-policy qualification.

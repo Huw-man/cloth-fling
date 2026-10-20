@@ -51,14 +51,16 @@ The latest longer-drag check completed both 12 cm drags and settled 1.38 cm and
 The user approved this centered v4 demonstration as the next training-pilot motion
 baseline. Its [approval record](configs/end-to-end-pilot-baseline-v1.json) pins the
 unchanged controller configuration and reviewed native evidence/replay hashes.
-The next pilot will build image-based grasp selection around this fixed continuation;
-training has not started.
+That baseline freeze preserved the fixed continuation before training began.
 
-The next [bounded image-grasp learning pilot](docs/image-learning-pilot.md) adds an
+The [bounded image-grasp learning pilot](docs/image-learning-pilot.md) adds an
 RGB value-map learner around that fixed motion, with family-isolated folds, one
 learner-state refresh and a paired three-action test. Use `cloth-fling learning-pilot
 run`; existing/uncertain run roots cannot be resumed. Its eight-hour/432-action
-ceiling is separate from all historical campaigns.
+ceiling is separate from all historical campaigns. Its [completed results](docs/image-learning-pilot-results.md)
+show .4764 held-out terminal coverage for the selected learner versus .3518 for
+random selection. Both remain below mean starting coverage .6226; reliable
+unfolding and material fidelity remain unqualified. The run is terminal.
 
 ## Install and check Genesis 1.4.4
 

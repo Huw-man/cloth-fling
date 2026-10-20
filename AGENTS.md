@@ -343,3 +343,14 @@ incomplete preparation or any ownership/restoration/contact/rendering/cleanup/ar
 regression stops dependent execution. Stable placement quality remains observational.
 Training is authorized only within this fixed pilot. Do not extend the budget or
 infer broad generalization, material fidelity or physical pinch-grasp qualification.
+
+The pilot's native work is terminal and complete: 21 fixtures, 144 episodes and
+383 action attempts, with 37 settlement failures retained. The first checkpoint
+was selected by validation; on held-out starts it reached mean terminal coverage
+.476394 versus .351837 for random selection (+.124557, all three family means
+positive, no test failures). Both policies reduced coverage from mean initial
+.622646, so useful reliable unfolding remains unmet. Peak material edge ratio
+2.970057 remains a separate limitation. See `docs/image-learning-pilot-results.md`
+and `runs/image-learning-pilot-v1/`. No further training, collection, reruns or
+tuning are authorized by unused budget. Offline deadline/accounting fixes do not
+reopen this experiment or alter its preserved executed source identity.
