@@ -79,7 +79,13 @@ class SceneConfig:
             raise ValueError("max_stretch_solver_iterations must be an integer in [1, 128]")
         if not isinstance(self.table_friction, bool):
             raise ValueError("table_friction must be a boolean")
-        if self.contact_profile not in ("legacy_mg_v1", "native_coulomb_v1", "native_coulomb_v2", "reference_split_v1"):
+        if self.contact_profile not in (
+            "legacy_mg_v1",
+            "native_coulomb_v1",
+            "native_coulomb_v2",
+            "reference_split_v1",
+            "reference_position_coulomb_v1",
+        ):
             raise ValueError("unsupported contact_profile")
         for name in ("table_static_friction", "table_kinetic_friction"):
             value = getattr(self, name)
@@ -223,19 +229,35 @@ class ReferenceSceneConfig(SceneConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        for name, count in (("cloth_center_m", 3), ("table_dimensions_m", 2),
-                            ("table_center_xy_m", 2), ("coverage_bounds_m", 4)):
+        for name, count in (
+            ("cloth_center_m", 3),
+            ("table_dimensions_m", 2),
+            ("table_center_xy_m", 2),
+            ("coverage_bounds_m", 4),
+        ):
             value = tuple(getattr(self, name))
             if len(value) != count or not all(math.isfinite(x) for x in value):
                 raise ValueError(f"invalid {name}")
             object.__setattr__(self, name, value)
-        if not all(math.isfinite(value) for value in asdict(self).values()
-                   if isinstance(value, (int, float))):
+        if not all(
+            math.isfinite(value)
+            for value in asdict(self).values()
+            if isinstance(value, (int, float))
+        ):
             raise ValueError("reference numeric settings must be finite")
-        if self.profile != "reference_laydown_v1" or self.contact_profile != "reference_split_v1":
+        if (self.profile, self.contact_profile) not in (
+            ("reference_laydown_v1", "reference_split_v1"),
+            ("reference_diagonal_v3", "reference_position_coulomb_v1"),
+        ):
             raise ValueError("reference profile requires its split contact operator")
-        for name in ("cloth_width_m", "cloth_mass_kg", "authored_thickness_m",
-                     "table_thickness_m", "coverage_cell_m", "controller_dt"):
+        for name in (
+            "cloth_width_m",
+            "cloth_mass_kg",
+            "authored_thickness_m",
+            "table_thickness_m",
+            "coverage_cell_m",
+            "controller_dt",
+        ):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be finite and positive")
         for name in ("stretch_relaxation", "bending_relaxation", "wrinkle_amplitude_m"):
@@ -249,8 +271,9 @@ class ReferenceSceneConfig(SceneConfig):
         ticks = self.controller_dt / self.sim_dt
         if self.substeps != 1 or not math.isclose(ticks, round(ticks)) or ticks < 1:
             raise ValueError("reference controller interval must contain whole physics steps")
-        if not math.isclose(self.cloth_mass_kg / (self.cloth_size_m * self.cloth_width_m),
-                            self.areal_density_kg_m2):
+        if not math.isclose(
+            self.cloth_mass_kg / (self.cloth_size_m * self.cloth_width_m), self.areal_density_kg_m2
+        ):
             raise ValueError("reference surface density and total mass disagree")
         x0, x1, y0, y1 = self.coverage_bounds_m
         if x0 >= x1 or y0 >= y1 or min(self.table_dimensions_m) <= 0:
@@ -268,5 +291,9 @@ class ReferenceSceneConfig(SceneConfig):
 
 def scene_config_from_dict(data):
     """Decode historical square configurations or the explicit reference profile."""
-    cls = ReferenceSceneConfig if data.get("profile") == "reference_laydown_v1" else SceneConfig
+    cls = (
+        ReferenceSceneConfig
+        if data.get("profile") in ("reference_laydown_v1", "reference_diagonal_v3")
+        else SceneConfig
+    )
     return cls(**data)

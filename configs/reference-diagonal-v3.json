@@ -1,0 +1,56 @@
+{
+  "cloth_size_m": 0.6,
+  "mesh_spacing_m": 0.01,
+  "areal_density_kg_m2": 0.5,
+  "sim_dt": 0.001,
+  "max_stretch_solver_iterations": 128,
+  "table_friction": true,
+  "table_size_m": 1.2,
+  "grasp_workspace_m": 0.9,
+  "min_grasp_separation_m": 0.08,
+  "max_grasp_separation_m": 0.7,
+  "stretch_compliance": 1e-07,
+  "bending_compliance": 1e-05,
+  "static_friction": 0.6,
+  "kinetic_friction": 0.6,
+  "air_resistance": 0.0,
+  "image_size": 256,
+  "seed": 0,
+  "contact_profile": "reference_position_coulomb_v1",
+  "table_static_friction": 0.3375,
+  "table_kinetic_friction": 0.3375,
+  "profile": "reference_diagonal_v3",
+  "cloth_width_m": 0.4,
+  "cloth_mass_kg": 0.12,
+  "authored_thickness_m": 0.002,
+  "cloth_center_m": [
+    0.5,
+    0.0,
+    0.311
+  ],
+  "table_dimensions_m": [
+    0.8,
+    1.0
+  ],
+  "table_center_xy_m": [
+    0.55,
+    0.0
+  ],
+  "table_surface_z_m": 0.3,
+  "table_thickness_m": 0.05,
+  "coverage_bounds_m": [
+    0.15,
+    0.95,
+    -0.4,
+    0.4
+  ],
+  "coverage_cell_m": 0.002,
+  "controller_dt": 0.02,
+  "substeps": 1,
+  "max_bending_solver_iterations": 1,
+  "stretch_relaxation": 0.3,
+  "bending_relaxation": 0.0,
+  "wrinkle_amplitude_m": 0.005,
+  "wrinkle_seed": 7,
+  "wrinkle_waves": 3
+}

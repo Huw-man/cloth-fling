@@ -55,11 +55,17 @@ def split_contact(positions, before, after, *, free, bounds, support_z, dt, mu=0
 class ReferenceBackend(GenesisBackend):
     """Reuses snapshot/rendering codec, with an independent physical configuration."""
 
-    def __init__(self, config=None, *, backend="gpu", headless=True, appearance=None):
+    def __init__(
+        self, config=None, *, backend="gpu", headless=True, appearance=None, diagnostic_load=False
+    ):
         config = config or ReferenceSceneConfig()
         if not isinstance(config, ReferenceSceneConfig) or backend not in ("gpu", "cpu"):
             raise ValueError("reference backend requires ReferenceSceneConfig and gpu/cpu")
         self.config, self.appearance = config, appearance
+        self.position_contact = config.contact_profile == "reference_position_coulomb_v1"
+        if diagnostic_load and not self.position_contact:
+            raise ValueError("external-load coupons require the versioned position-contact profile")
+        self.diagnostic_field = None
         self.substeps = config.substeps
         self.simulated_time = 0.0
         self.attached_ids = ()
@@ -159,6 +165,23 @@ class ReferenceBackend(GenesisBackend):
                 GUI=False,
             )
             self._physics_mesh_rendering = PhysicsMeshRendering(self.scene, self.cloth, gs)
+            if self.position_contact:
+                from pathlib import Path
+
+                from cloth_fling.sim import position_contact
+                from cloth_fling.sim.position_contact import (
+                    install_position_contact,
+                    make_diagnostic_field,
+                )
+
+                self._position_contact_hash = hashlib.sha256(
+                    Path(position_contact.__file__).read_bytes()
+                ).hexdigest()
+                install_position_contact(self.scene, table, config)
+                if diagnostic_load:
+                    self.diagnostic_field = make_diagnostic_field(
+                        self.scene, self.cloth.n_particles
+                    )
             self.scene.build()
             if appearance:
                 from cloth_fling.sim.appearance import install_native_material
@@ -208,7 +231,7 @@ class ReferenceBackend(GenesisBackend):
             "engine_version": ENGINE_VERSION,
             "physics_schema_version": 2,
             "solver": "PBD",
-            "coupler": "LegacyCoupler+reference_split_v1",
+            "coupler": "LegacyCoupler+" + self.config.contact_profile,
             "contact_profile": self.config.contact_profile,
             "profile": self.config.profile,
             "sim_dt": self.config.sim_dt,
@@ -216,18 +239,25 @@ class ReferenceBackend(GenesisBackend):
             "max_stretch_solver_iterations": self.config.max_stretch_solver_iterations,
             "precision": "32",
             **self._runtime_settings,
+            **(
+                {"contact_adapter_sha256": self._position_contact_hash}
+                if self.position_contact
+                else {}
+            ),
         }
 
     @property
     def capabilities(self):
         return {
             **super().capabilities,
-            "native_contact_accounting": False,
+            "native_contact_accounting": self.position_contact,
             "contact_qualification": "reference_unqualified",
             "attachment": "single_vertex",
         }
 
     def take_contact_accounting(self, *, reset=False):
+        if self.position_contact:
+            return self.scene.sim.coupler.take_contact_accounting(reset=reset)
         result = {
             "schema_version": 1,
             "profile": self.config.contact_profile,
@@ -306,6 +336,19 @@ class ReferenceBackend(GenesisBackend):
             positions, after = self.get_positions(), self.get_velocities()
             free = np.ones(len(positions), dtype=bool)
             free[list(self.attached_ids)] = False
+            if self.position_contact:
+                self.simulated_time += self.config.sim_dt
+                self._dirty()
+                if self.attached_ids:
+                    error = float(
+                        np.linalg.norm(
+                            positions[list(self.attached_ids)] - self._targets, axis=1
+                        ).max()
+                    )
+                    self.tracking_error_m = max(self.tracking_error_m, error)
+                    if error > 1e-6:
+                        raise RuntimeError("hard-pin tracking tolerance exceeded")
+                continue
             corrected, ids = split_contact(
                 positions,
                 before,

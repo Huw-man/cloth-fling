@@ -141,3 +141,15 @@ three frozen confirmations after eight development attempts. The trajectory is i
 `configs/reference-leading-v2-frozen.json`; results are in
 `docs/reference-leading-results.md`. Its fixture claim is terminal. No additional
 motion, changed grasps or new campaign budgets follow from that local qualification.
+
+## Progressive diagonal and contact campaign (new authorization)
+
+The user approved the plan in `docs/reference-diagonal.md`: explicit native
+position-level Coulomb table physics, followed only after contact qualification by
+at most 12 diagonal trials and three frozen checks. Contact qualification has at
+most 16 .5-s/60-wall-s coupons; the entire campaign, including rendering, has two
+hours simulator wall. Actions retain 35 simulated/180 wall seconds. Preserve material,
+mesh, table, appearance, favorable pins and historical terminal campaigns. Native
+friction may apply bounded dissipative tangential position corrections to supported
+free vertices as explicit physics. Diagnostic force fields belong only to coupons.
+No training, varied grasps, broad collection, cloud, hardware or publication.

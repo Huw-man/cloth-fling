@@ -21,7 +21,11 @@ def load_config(path: str | None) -> SceneConfig:
     data = json.loads(Path(path).read_text())
     if not isinstance(data, dict):
         raise ValueError("scene configuration must be a JSON object")
-    cls = ReferenceSceneConfig if data.get("profile") == "reference_laydown_v1" else SceneConfig
+    cls = (
+        ReferenceSceneConfig
+        if data.get("profile") in ("reference_laydown_v1", "reference_diagonal_v3")
+        else SceneConfig
+    )
     unknown = set(data) - {field.name for field in fields(cls)}
     if unknown:
         raise ValueError(f"unknown configuration fields: {sorted(unknown)}")
@@ -171,9 +175,14 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--settled-coverage-threshold", type=float)
 
     reference = sub.add_parser("reference", help="Bounded reference towel qualification")
-    reference.add_argument("stage", choices=("qualify", "tune"))
+    reference.add_argument("stage", choices=("qualify", "tune", "contact-qualify", "diagonal"))
     reference.add_argument(
         "--fixture", type=Path, help="Archived failed reference campaign (tune only)"
+    )
+    reference.add_argument(
+        "--contact-report",
+        type=Path,
+        help="Pinned contact report in the same campaign (diagonal only)",
     )
     reference.add_argument("--output", type=Path, required=True)
     reference.add_argument(
@@ -232,7 +241,27 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "reference":
             from cloth_fling.reference_run import run_reference_qualification
 
-            if args.stage == "tune":
+            if args.stage in ("contact-qualify", "diagonal"):
+                from cloth_fling.reference_diagonal_run import (
+                    run_contact_qualification,
+                    run_diagonal_campaign,
+                )
+
+                if args.previous is not None:
+                    raise ValueError("new diagonal campaign does not accept --previous")
+                if args.stage == "contact-qualify":
+                    if args.fixture is None or args.contact_report is not None:
+                        raise ValueError("contact-qualify requires --fixture only")
+                    report = run_contact_qualification(
+                        args.output, fixture_dir=args.fixture, backend=args.backend
+                    )
+                else:
+                    if args.fixture is not None:
+                        raise ValueError("diagonal uses the fixture pinned by contact-qualify")
+                    report = run_diagonal_campaign(
+                        args.output, contact_report=args.contact_report, backend=args.backend
+                    )
+            elif args.stage == "tune":
                 from cloth_fling.reference_tune import run_reference_tuning
 
                 if args.fixture is None or args.previous is not None:

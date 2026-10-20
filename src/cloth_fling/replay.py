@@ -107,7 +107,13 @@ def load_replay(source, *, episode_id=None):
     """Offline loader. Retain invalid attempts and group dataset rows by episode/step."""
     source = Path(source).resolve()
     actions = []
-    if source.is_dir() and (source / "tune-report.json").is_file():
+    if source.is_dir() and (source / "contact-report.json").is_file():
+        from cloth_fling.reference_diagonal_replay import load_diagonal_replay
+
+        if episode_id is not None:
+            raise ValueError("episode_id selection applies to datasets only")
+        actions, origin = load_diagonal_replay(source)
+    elif source.is_dir() and (source / "tune-report.json").is_file():
         from cloth_fling.reference_tune import read_hashed_bundle
 
         if episode_id is not None:
@@ -397,14 +403,14 @@ def render_replay(
         kind="reconstructed_replay",
         writer_factory=writer_factory,
     ) as recorder:
-        if origin["format"] == "reference_tuning":
+        if origin["format"] in ("reference_tuning", "reference_diagonal"):
             recorder.view_poses = {
                 "overhead": {"pos": (0.55, 0, 2.9), "lookat": (0.55, 0, 0.4), "up": (0, 1, 0)},
                 "oblique": {"pos": (1.9, -1.9, 1.7), "lookat": (0.50, 0, 0.5), "up": (0, 0, 1)},
             }
         for index, action in enumerate(actions):
             template = json.loads(str(action.state["config_json"]))
-            reference = template.get("profile") == "reference_laydown_v1"
+            reference = template.get("profile") in ("reference_laydown_v1", "reference_diagonal_v3")
             if native_template and not reference:
                 # The new backend rejects archival contact laws. This selects
                 # its current template only; replay never executes that law.

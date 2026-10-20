@@ -1,0 +1,775 @@
+{
+  "version": "reference_diagonal_v3",
+  "limits": {
+    "contact": 16,
+    "development": 12,
+    "confirmation": 3,
+    "simulator_wall_seconds": 7200,
+    "action_simulated_seconds": 35,
+    "action_wall_seconds": 180
+  },
+  "contact_cases": [
+    {
+      "name": "rest",
+      "kind": "rest"
+    },
+    {
+      "name": "coast_positive",
+      "kind": "coast",
+      "direction": 1
+    },
+    {
+      "name": "coast_negative",
+      "kind": "coast",
+      "direction": -1
+    },
+    {
+      "name": "uniform_sub",
+      "kind": "load",
+      "mode": "uniform",
+      "factor": 0.5,
+      "direction": 1
+    },
+    {
+      "name": "uniform_super",
+      "kind": "load",
+      "mode": "uniform",
+      "factor": 1.5,
+      "direction": 1
+    },
+    {
+      "name": "edge_sub_positive",
+      "kind": "load",
+      "mode": "edge",
+      "factor": 0.5,
+      "direction": 1
+    },
+    {
+      "name": "edge_sub_negative",
+      "kind": "load",
+      "mode": "edge",
+      "factor": 0.5,
+      "direction": -1
+    },
+    {
+      "name": "edge_super_positive",
+      "kind": "load",
+      "mode": "edge",
+      "factor": 1.5,
+      "direction": 1
+    },
+    {
+      "name": "edge_super_negative",
+      "kind": "load",
+      "mode": "edge",
+      "factor": 1.5,
+      "direction": -1
+    },
+    {
+      "name": "oblique_landing",
+      "kind": "landing"
+    },
+    {
+      "name": "airborne",
+      "kind": "airborne"
+    },
+    {
+      "name": "attached_exclusion",
+      "kind": "attached"
+    },
+    {
+      "name": "edge_sub_half_dt",
+      "kind": "load",
+      "mode": "edge",
+      "factor": 0.5,
+      "direction": 1,
+      "dt": 0.0005
+    },
+    {
+      "name": "edge_super_half_dt",
+      "kind": "load",
+      "mode": "edge",
+      "factor": 1.5,
+      "direction": 1,
+      "dt": 0.0005
+    },
+    {
+      "name": "zero_uniform",
+      "kind": "load",
+      "mode": "uniform",
+      "factor": 0.5,
+      "direction": 1,
+      "zero": true
+    },
+    {
+      "name": "zero_edge",
+      "kind": "load",
+      "mode": "edge",
+      "factor": 0.5,
+      "direction": 1,
+      "zero": true
+    }
+  ],
+  "candidates": [
+    {
+      "index": 0,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.78,
+        "diagonal_seconds": 6,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 14.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 18.2,
+        "peak_speed_m_s": 0.2918154382482183,
+        "peak_acceleration_m_s2": 0.14975975273448663,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 6,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.799999999999987,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -10.199999999999982,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                4.079999999999993,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.78,
+        "diagonal_seconds": 8,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 12.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 20.2,
+        "peak_speed_m_s": 0.21886157868616374,
+        "peak_acceleration_m_s2": 0.08423986091314872,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 8,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.799999999999987,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -10.199999999999982,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                4.079999999999993,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.78,
+        "diagonal_seconds": 10,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 10.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 22.2,
+        "peak_speed_m_s": 0.17508926294893107,
+        "peak_acceleration_m_s2": 0.053913510984415186,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 10,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.799999999999987,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -10.199999999999982,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                4.079999999999993,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.78,
+        "diagonal_seconds": 4,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 16.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 16.2,
+        "peak_speed_m_s": 0.4377231573723275,
+        "peak_acceleration_m_s2": 0.3369594436525949,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 4,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.799999999999987,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -10.199999999999982,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                4.079999999999993,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.76,
+        "diagonal_seconds": 6,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 14.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 18.2,
+        "peak_speed_m_s": 0.28729612336402954,
+        "peak_acceleration_m_s2": 0.1474404392545408,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 6,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.599999999999987,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -9.899999999999983,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                3.9599999999999933,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 5,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.76,
+        "diagonal_seconds": 8,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 12.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 20.2,
+        "peak_speed_m_s": 0.21547209252302219,
+        "peak_acceleration_m_s2": 0.08293524708067923,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 8,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.599999999999987,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -9.899999999999983,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                3.9599999999999933,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 6,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.76,
+        "diagonal_seconds": 10,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 10.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 22.2,
+        "peak_speed_m_s": 0.17237767401841778,
+        "peak_acceleration_m_s2": 0.05307855813163471,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 10,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.599999999999987,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -9.899999999999983,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                3.9599999999999933,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 7,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.76,
+        "diagonal_seconds": 4,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 16.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 16.2,
+        "peak_speed_m_s": 0.43094418504604437,
+        "peak_acceleration_m_s2": 0.3317409883227169,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 4,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.599999999999987,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -9.899999999999983,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                3.9599999999999933,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 8,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.74,
+        "diagonal_seconds": 6,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 14.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 18.2,
+        "peak_speed_m_s": 0.28284271247461856,
+        "peak_acceleration_m_s2": 0.1451549477204844,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 6,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.399999999999989,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -9.599999999999984,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                3.839999999999993,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 9,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.74,
+        "diagonal_seconds": 8,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 12.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 20.2,
+        "peak_speed_m_s": 0.21213203435596387,
+        "peak_acceleration_m_s2": 0.08164965809277246,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 8,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.399999999999989,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -9.599999999999984,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                3.839999999999993,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 10,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.74,
+        "diagonal_seconds": 10,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 10.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 22.2,
+        "peak_speed_m_s": 0.1697056274847712,
+        "peak_acceleration_m_s2": 0.05225578117937441,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 10,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.399999999999989,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -9.599999999999984,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                3.839999999999993,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 11,
+      "trajectory": {
+        "version": "reference_diagonal_v3",
+        "endpoint_x_m": 0.74,
+        "diagonal_seconds": 4,
+        "endpoint_hold_seconds": 1.0,
+        "max_tug_m": 0.02
+      },
+      "schedule": {
+        "tauten_allowance_seconds": 16.6,
+        "maximum_action_seconds": 35.0,
+        "reserved_after_tauten_seconds": 16.2,
+        "peak_speed_m_s": 0.42426406871192773,
+        "peak_acceleration_m_s2": 0.3265986323710898,
+        "segments": [
+          {
+            "phase": "diagonal",
+            "seconds": 4,
+            "coefficients": [
+              [
+                0.1,
+                0.0,
+                0.95
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                6.399999999999989,
+                0.0,
+                -6.399999999999989
+              ],
+              [
+                -9.599999999999984,
+                -0.0,
+                9.599999999999982
+              ],
+              [
+                3.839999999999993,
+                0.0,
+                -3.8399999999999928
+              ]
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
