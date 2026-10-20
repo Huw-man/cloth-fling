@@ -23,7 +23,7 @@ from cloth_fling.spatial_actions import select_spatial_action
 FIXTURE_SHA256 = "04a3b4083011bb2dbb5c749c57918c4090f6bbd5b302c01c267a3c3bfd2167f9"
 FIXTURE_STATE_HASH = "e9b92de2d79a59b21f64029ddad6edf7b86f21184725e9d73dd0f355e4fd0445"
 FIXTURE = "runs/friction-motion-demo-continued-20261019/fixture.json"
-OUTPUT = "runs/image-grasp-laydown-pilot-drag-v3-20261019"
+OUTPUT = "runs/image-grasp-laydown-pilot-centered-drag-v4-20261019"
 
 
 def write(root, name, value):
@@ -298,6 +298,7 @@ def assess(root):
                 "workspace_center_xy_m": workspace_center,
                 "final_center_error_xy_m": footprint_center - workspace_center,
                 "final_center_error_m": float(np.linalg.norm(footprint_center - workspace_center)),
+                "placement_centering": evidence["evidence"].get("placement_centering"),
                 "final_drag_coverage_before": drag_before,
                 "final_drag_coverage_after": drag_after,
                 "final_drag_coverage_gain": (
@@ -310,7 +311,7 @@ def assess(root):
                     target_distance_m=(
                         evidence["evidence"].get("trajectory", {}).get("max_tug_m")
                         if evidence["evidence"].get("trajectory", {}).get("version")
-                        == "reference_diagonal_drag_v4"
+                        in ("reference_diagonal_drag_v4", "reference_diagonal_centered_drag_v5")
                         else None
                     ),
                 ),
@@ -336,7 +337,7 @@ def assess(root):
     }
 
 
-def run_pilot(root, fixture_path, *, backend_factory=None, renderer=None):
+def run_pilot(root, fixture_path, *, backend_factory=None, renderer=None, budget_predecessor=None):
     root, fixture_path = Path(root), Path(fixture_path)
     # Claim the entire experiment before constructing a scene; existing roots are terminal.
     root.mkdir(parents=True, exist_ok=False)
@@ -356,7 +357,25 @@ def run_pilot(root, fixture_path, *, backend_factory=None, renderer=None):
     }
     write(root, "pilot-report.json", report)
     env = None
+    previous_charge = 0.0
     try:
+        if budget_predecessor is not None:
+            predecessor = json.loads(Path(budget_predecessor).read_text())
+            previous_charge = predecessor.get(
+                "cumulative_wall_seconds", predecessor["wall_seconds"]
+            )
+            if (
+                predecessor["status"] not in ("complete", "incomplete")
+                or not np.isfinite(previous_charge)
+                or not 0 <= previous_charge < 3600
+            ):
+                raise ValueError("centering correction requires a terminal, accounted predecessor")
+            deadline -= previous_charge
+            report["budget_predecessor"] = {
+                "source_relative_file": str(budget_predecessor),
+                "sha256": file_sha256(budget_predecessor),
+                "charged_wall_seconds": previous_charge,
+            }
         if file_sha256(fixture_path) != FIXTURE_SHA256:
             raise ValueError("expected the exact archived reference fixture")
         fixture = read_hashed_bundle(fixture_path.parent, fixture_path.name)
@@ -404,6 +423,7 @@ def run_pilot(root, fixture_path, *, backend_factory=None, renderer=None):
         raise
     finally:
         report["wall_seconds"] = time.monotonic() - started
+        report["cumulative_wall_seconds"] = previous_charge + report["wall_seconds"]
         write(root, "pilot-report.json", report)
     return report
 
@@ -412,8 +432,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path(OUTPUT))
     parser.add_argument("--fixture", type=Path, default=Path(FIXTURE))
+    parser.add_argument(
+        "--budget-predecessor",
+        type=Path,
+        default=Path("runs/image-grasp-laydown-pilot-drag-v3-20261019/pilot-report.json"),
+    )
     args = parser.parse_args()
-    report = run_pilot(args.output, args.fixture)
+    report = run_pilot(args.output, args.fixture, budget_predecessor=args.budget_predecessor)
     print(
         json.dumps({key: report[key] for key in ("status", "integration_passed", "wall_seconds")})
     )

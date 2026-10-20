@@ -35,8 +35,8 @@ release and settling with .9798 coverage. Physics and trajectory were unchanged;
 contact qualification remains incomplete.
 The user-selected [frozen post-grasp laydown](docs/frozen-laydown.md) now adopts an
 already-held native grasp and runs this motion without reattachment or a reset.
-Its current configuration is `configs/reference-post-grasp-laydown-v3-frozen.json`,
-with a 12 cm final drag and a shortened diagonal targeting a centered cloth
+Its current configuration is `configs/reference-post-grasp-laydown-v4-frozen.json`,
+with a 12 cm final drag and a measured-geometry diagonal targeting a centered cloth
 footprint. It retains the off-center tug correction; v1/v2 remain historical.
 The [two-action image-grasp integration pilot](docs/image-grasp-pilot.md) completed
 the selection/attachment/laydown loop twice without resetting. Continuity passed;
