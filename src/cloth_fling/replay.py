@@ -403,7 +403,12 @@ def render_replay(
         kind="reconstructed_replay",
         writer_factory=writer_factory,
     ) as recorder:
-        if origin["format"] in ("reference_tuning", "reference_diagonal"):
+        reference_scene = any(
+            json.loads(str(action.state["config_json"])).get("profile")
+            in ("reference_laydown_v1", "reference_diagonal_v3")
+            for action in actions
+        )
+        if origin["format"] in ("reference_tuning", "reference_diagonal") or reference_scene:
             recorder.view_poses = {
                 "overhead": {"pos": (0.55, 0, 2.9), "lookat": (0.55, 0, 0.4), "up": (0, 1, 0)},
                 "oblique": {"pos": (1.9, -1.9, 1.7), "lookat": (0.50, 0, 0.5), "up": (0, 0, 1)},

@@ -213,3 +213,14 @@ Configuration and controller hashes are frozen; changes require a new version.
 This is user selection of development evidence, not new contact, varied-grasp or
 learner qualification. Post-grasp lifecycle/target parity is checked offline; no
 new native campaign is implied. Preserve every historical terminal run unchanged.
+
+## Two-action image-grasp integration pilot (new authorization)
+
+The user authorized the refined plan in `docs/image-grasp-pilot.md`: one exact
+archived reference fixture, RNG 100 uniform feasible image grasps, at most two
+actions without an intervening reset, and the unchanged frozen post-grasp laydown.
+The total wall ceiling is one hour, with existing 35 simulated/180 wall-second
+action bounds. Preserve failed/uncertain actions without retry or reroll. Placement
+quality is observational; physical execution, ownership, cleanup and artifact
+regressions stop. No new fold recipes, broad collection, training, cloud, hardware
+or publication. Deliver project-relative replay paths without opening a viewer.
