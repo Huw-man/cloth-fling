@@ -168,3 +168,14 @@ authorized a separate bounded demonstration. Its corrected contact gate passed
 one-shot native ledger is closed. Preserve this failure separately; do not resume
 either terminal run or infer contact qualification. See
 `docs/reference-diagonal-demo.md`.
+
+After the disclosed contact failure, the user explicitly renewed the request for
+a table-start motion demonstration using the updated friction. One separate
+exploratory action ran at the normal timestep without claiming qualification or
+reopening a campaign. It lifted, tautened, held airborne for 3 s and entered the
+diagonal, then stopped at 10.18 s on `deposited_body_sliding`; cleanup passed.
+The same physics, favorable pins, trajectory and execution checks were retained.
+No tuning, retry or confirmation was performed. Preserve its terminal ledger and
+failure under `runs/friction-motion-demo-20261019/`; see
+`docs/friction-motion-demo.md`. Provide replay file paths without opening viewer
+panes; the user handles remote terminal-browser viewing with its own `--ssh` flag.

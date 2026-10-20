@@ -25,6 +25,10 @@ adds position-level friction and a slack-taking tug; its first contact campaign 
 [incomplete](docs/reference-diagonal-results.md), with no motion trials executed.
 The subsequent [requested one-shot demonstration](docs/reference-diagonal-demo.md)
 also stopped at contact qualification: sliding failed the half-timestep check.
+The later [exploratory motion run](docs/friction-motion-demo.md) executed a lift,
+airborne hold and partial diagonal laydown with the new friction, then stopped on
+deposited-body sliding. Its replay contains actual motion; qualification remains
+incomplete.
 
 ## Install and check Genesis 1.4.4
 
