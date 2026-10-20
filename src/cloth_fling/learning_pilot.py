@@ -455,7 +455,17 @@ class EpisodeExecutor:
             ):
                 raise RuntimeError("selection observation provenance mismatch")
             outcome.evidence["selection"] = self.policy.selection
-            state_metrics(env)
+            try:
+                state_metrics(env)
+            except RuntimeError as exc:
+                # The primitive returned durable evidence. Do not discard it by
+                # turning a post-execution safeguard into an empty collector exception.
+                self.fatal = f"native state validation: {exc}"
+                outcome.execution_valid = False
+                outcome.terminated = True
+                outcome.reason = self.fatal
+                outcome.diagnostics["native_state_validation_error"] = str(exc)
+                return outcome
             if getattr(env, "position_contact", False):
                 contact = outcome.evidence.get("contact", {}).get("totals", {})
                 if (
@@ -487,6 +497,16 @@ class EpisodeExecutor:
         except BaseException as exc:
             self.fatal = f"uncertain execution: {type(exc).__name__}: {exc}"
             raise
+
+
+def saved_action_before_hash(root, index, support, execution_valid):
+    """Recover pre-action evidence for failed execution without inventing a handoff."""
+    before = support.get("evidence", {}).get("image_grasp_handoff", {}).get("before_state_hash")
+    if before is None and not execution_valid:
+        folder = Path(root) / f"action-{index:02d}"
+        if (folder / "action-00-before.json").exists():
+            before = read_hashed_bundle(folder, "action-00-before.json")["state_hash"]
+    return before
 
 
 def episode(
@@ -575,13 +595,15 @@ def episode(
         details = []
         for i, row in enumerate(rows):
             support = read_support(root / "dataset", row["evidence_path"])
+            native_chain_verified = True
             if i:
                 for suffix in ("observation_id", "rgb_path", "support_path"):
                     if row[f"before_{suffix}"] != rows[i - 1][f"after_{suffix}"]:
                         raise RuntimeError("episode observation chain regression")
                 state = read_support(root / "dataset", rows[i - 1]["final_state_path"])
-                handoff = support.get("evidence", {}).get("image_grasp_handoff", {})
-                if handoff.get("before_state_hash") != state["state_hash"]:
+                before_hash = saved_action_before_hash(root, i, support, row["execution_valid"])
+                native_chain_verified = before_hash == state["state_hash"]
+                if not native_chain_verified and (before_hash is not None or not executor.fatal):
                     raise RuntimeError("episode native state chain regression")
             diagnostics = support.get("diagnostics", {})
             concise_diagnostics = {
@@ -602,6 +624,7 @@ def episode(
                 )
                 if k in diagnostics
             }
+            concise_diagnostics["native_chain_verified"] = native_chain_verified
             state_path = row.get("final_state_path")
             if row["execution_valid"] and not state_path:
                 raise RuntimeError("missing native terminal state artifact")

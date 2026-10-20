@@ -9,6 +9,53 @@ from cloth_fling import learning_pilot as pilot
 from cloth_fling.data import read_support, read_transitions
 
 
+def test_post_execution_safeguard_retains_outcome_and_original_failure(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    selection = {"observation_id": "observed", "predicted_gain": 0.2}
+    outcome = SimpleNamespace(
+        evidence={
+            "image_grasp_handoff": {"before_observation_id": "observed"},
+            "phase_traces": [{"phase": "terminal"}],
+        },
+        diagnostics={},
+        execution_valid=True,
+        terminated=False,
+        reason="completed",
+    )
+    monkeypatch.setattr(pilot, "PilotExecutor", lambda *args: lambda *a, **k: outcome)
+
+    def safeguard(env):
+        raise RuntimeError("native deformation/domain safeguard")
+
+    monkeypatch.setattr(pilot, "state_metrics", safeguard)
+    journal = SimpleNamespace(remaining=lambda: 1000, claim_action=lambda *args: None)
+    executor = pilot.EpisodeExecutor(None, tmp_path, journal, SimpleNamespace(selection=selection))
+    actual = executor(None, ACTION, config=None)
+    assert actual is outcome and not actual.execution_valid and actual.terminated
+    assert (
+        actual.reason
+        == executor.fatal
+        == "native state validation: native deformation/domain safeguard"
+    )
+    assert actual.evidence["phase_traces"] == [{"phase": "terminal"}]
+    assert actual.evidence["selection"] == selection
+
+
+def test_invalid_action_uses_hashed_preaction_receipt_for_chain(tmp_path):
+    folder = tmp_path / "action-02"
+    folder.mkdir()
+    pilot.save_bundle(
+        folder, "action-00-before", {"state_hash": "previous-end", "positions": np.zeros((2, 3))}
+    )
+    assert pilot.saved_action_before_hash(tmp_path, 2, {"evidence": {}}, False) == "previous-end"
+    assert pilot.saved_action_before_hash(tmp_path, 2, {"evidence": {}}, True) is None
+    assert pilot.saved_action_before_hash(tmp_path, 1, {"evidence": {}}, False) is None
+    (folder / "action-00-before.npz").write_bytes(b"corrupt")
+    with pytest.raises(ValueError):
+        pilot.saved_action_before_hash(tmp_path, 2, {"evidence": {}}, False)
+
+
 def test_split_families_and_schedule_are_bounded():
     cases = pilot.fixture_cases()
     assert len(cases) == 21
