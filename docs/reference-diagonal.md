@@ -47,7 +47,8 @@ frozen configuration. Old terminal commands keep their offline behavior.
 
 The sixteen frozen coupons cover rest, ±coasting, uniform and ±edge loading below
 and above Coulomb breakaway, oblique landing, airborne/attached exclusions, two
-half-timestep edge-load checks and two zero-friction controls. Native external
+half-timestep edge-load checks and two zero-friction controls. The airborne coupon is bounded to .3 s so a drop
+from .8 m remains airborne throughout; other coupons allow .5 s. Native external
 force fields are confined to coupon scenes. Loads of .5 or 1.5 times .45Mg act from
 .1 to .3 s; the initial .1 s allows flat-coupon relaxation. Rest drift is also
 measured after this initial relaxation. Edge loads act on the outer 10% strip and
@@ -97,3 +98,10 @@ certificates are durable before reporting. Wide overhead/oblique replays import
 saved geometry only and never step physics. Report a failure as a failure, even if
 final projected coverage is high. Open the successful replay only if every gate and
 all three confirmations pass.
+
+## Current result
+
+The first campaign passed ten contact checks and stopped at an airborne-fixture
+setup error before any motion. The airborne duration is corrected offline; the run
+remains terminal and qualification incomplete. See the
+[measured results and preserved failure](reference-diagonal-results.md).

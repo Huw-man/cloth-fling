@@ -77,7 +77,7 @@ def contact_cases():
             for sign, direction in (("positive", 1), ("negative", -1))
         ],
         {"name": "oblique_landing", "kind": "landing"},
-        {"name": "airborne", "kind": "airborne"},
+        {"name": "airborne", "kind": "airborne", "duration_s": 0.3},
         {"name": "attached_exclusion", "kind": "attached"},
         {
             "name": "edge_sub_half_dt",
@@ -248,7 +248,7 @@ def run_contact_case(config, case, *, backend, cleanup_callback, evidence_callba
         env.take_contact_accounting(reset=True)
         positions, velocities, times = [env.get_positions()], [env.get_velocities()], [0.0]
         contact_samples = []
-        for step in range(round(0.5 / cfg.sim_dt)):
+        for step in range(round(case.get("duration_s", 0.5) / cfg.sim_dt)):
             sec = step * cfg.sim_dt
             if env.diagnostic_field is not None:
                 if 0.1 - 1e-10 <= sec < 0.3 - 1e-10:

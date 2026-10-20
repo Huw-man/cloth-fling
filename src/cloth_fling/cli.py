@@ -177,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     reference = sub.add_parser("reference", help="Bounded reference towel qualification")
     reference.add_argument("stage", choices=("qualify", "tune", "contact-qualify", "diagonal"))
     reference.add_argument(
-        "--fixture", type=Path, help="Archived failed reference campaign (tune only)"
+        "--fixture", type=Path, help="Archived failed reference campaign (tune/contact-qualify)"
     )
     reference.add_argument(
         "--contact-report",
@@ -241,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "reference":
             from cloth_fling.reference_run import run_reference_qualification
 
+            if args.contact_report is not None and args.stage != "diagonal":
+                raise ValueError("--contact-report applies to reference diagonal only")
             if args.stage in ("contact-qualify", "diagonal"):
                 from cloth_fling.reference_diagonal_run import (
                     run_contact_qualification,

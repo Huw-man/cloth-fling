@@ -20,6 +20,9 @@ dynamic-fling reproduction are deferred; this profile does not resume milestone 
 The separate [leading-edge development campaign](docs/reference-leading.md) adds
 `reference tune` with a frozen trajectory grid and durable attempt accounting.
 Its [frozen favorable-grasp trajectory passed three confirmations](docs/reference-leading-results.md).
+The new [progressive diagonal/contact implementation](docs/reference-diagonal.md)
+adds position-level friction and a slack-taking tug; its first contact campaign is
+[incomplete](docs/reference-diagonal-results.md), with no motion trials executed.
 
 ## Install and check Genesis 1.4.4
 

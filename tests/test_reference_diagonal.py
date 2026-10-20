@@ -446,3 +446,25 @@ def test_new_landings_do_not_dilute_a_previously_deposited_cohort():
     body.update(p, v, free, contacts, [0.7, 0, 0.5], "diagonal")
     assert body.main_max_p95 == pytest.approx(0.02)
     assert len(body.cohorts) == 2
+
+
+def test_airborne_coupon_finishes_before_ballistic_table_contact():
+    case = next(c for c in contact_cases() if c["kind"] == "airborne")
+    dt = 0.001
+    duration = case["duration_s"]
+    # Semi-implicit Euler includes the extra t*dt term; use the half-dt check too.
+    for step in (dt, dt / 2):
+        height = 0.8 - 0.5 * 9.81 * duration * (duration + step)
+        assert height > 0.30
+    assert duration <= 0.5
+
+
+def test_corrected_airborne_fixture_does_not_reopen_terminal_campaign(tmp_path):
+    (tmp_path / "contact-report.json").write_text(
+        '{"status":"contact_limitation","stage_passed":false}'
+    )
+    assert (
+        run_contact_qualification(tmp_path, fixture_dir="missing")["status"] == "contact_limitation"
+    )
+    assert run_diagonal_campaign(tmp_path)["status"] == "contact_gate_stop"
+    assert not (tmp_path / "diagonal-stage.claim").exists()

@@ -153,3 +153,10 @@ mesh, table, appearance, favorable pins and historical terminal campaigns. Nativ
 friction may apply bounded dissipative tangential position corrections to supported
 free vertices as explicit physics. Diagnostic force fields belong only to coupons.
 No training, varied grasps, broad collection, cloud, hardware or publication.
+
+The first diagonal-v3 campaign is terminal and incomplete: ten contact cases passed;
+the .5-second airborne diagnostic landed at .404 s and failed its no-contact gate.
+No motion trials or confirmations ran. The airborne case now ends at .3 s and has
+CPU regression coverage, but has not been rerun on GPU. Do not resume or extend the
+closed campaign or infer full contact/motion qualification. See
+`docs/reference-diagonal-results.md` and the preserved original source/artifacts.

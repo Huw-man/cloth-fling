@@ -71,7 +71,8 @@
     },
     {
       "name": "airborne",
-      "kind": "airborne"
+      "kind": "airborne",
+      "duration_s": 0.3
     },
     {
       "name": "attached_exclusion",
