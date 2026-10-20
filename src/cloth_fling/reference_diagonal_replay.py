@@ -27,6 +27,10 @@ def load_diagonal_replay(root):
             label = f"{record['category']} {record['attempt']}/c{record['candidate']} " + (
                 "PASS" if record["passed"] else "FAIL"
             )
+            if run.get("diagnostics", {}).get("execution_mode") == "demonstration":
+                label = (
+                    f"exploratory demonstration {record['attempt']}: {run['reason']} (unqualified)"
+                )
             actions.append(
                 validate_action(
                     ReplayAction(

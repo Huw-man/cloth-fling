@@ -29,6 +29,10 @@ The later [exploratory motion run](docs/friction-motion-demo.md) executed a lift
 airborne hold and partial diagonal laydown with the new friction, then stopped on
 deposited-body sliding. Its replay contains actual motion; qualification remains
 incomplete.
+After making placement quality observational, the
+[continued demonstration](docs/friction-motion-continued.md) completed through
+release and settling with .9798 coverage. Physics and trajectory were unchanged;
+contact qualification remains incomplete.
 
 ## Install and check Genesis 1.4.4
 

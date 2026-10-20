@@ -516,6 +516,58 @@ def test_contact_only_failure_replay_preserves_native_geometry_and_hashes(tmp_pa
         load_replay(tmp_path)
 
 
+def test_completed_demonstration_replay_does_not_label_quality_metrics_as_failed_execution(
+    tmp_path,
+):
+    from test_replay import snapshot
+
+    from cloth_fling.reference_run import save_bundle
+    from cloth_fling.replay import load_replay
+
+    state = snapshot()
+    fixture = save_bundle(tmp_path, "fixture", state)
+    outcome = save_bundle(
+        tmp_path,
+        "action-00",
+        {
+            "simulated_seconds": 0.1,
+            "execution_valid": True,
+            "reason": "completed",
+            "diagnostics": {"execution_mode": "demonstration"},
+            "evidence": {
+                "phase_traces": [
+                    {
+                        "phase": "settle",
+                        "simulated_seconds": 0,
+                        "cloth_positions_m": state["positions"],
+                        "attachment_ids": [],
+                    }
+                ]
+            },
+        },
+    )
+    (tmp_path / "contact-report.json").write_text(json.dumps({"cases": [], "fixture": fixture}))
+    (tmp_path / "diagonal-report.json").write_text(
+        json.dumps(
+            {
+                "attempts": [
+                    {
+                        "attempt": 0,
+                        "category": "demonstration",
+                        "candidate": 0,
+                        "passed": False,
+                        "outcome": outcome,
+                    }
+                ]
+            }
+        )
+    )
+    actions, _ = load_replay(tmp_path)
+    assert actions[0].execution_valid
+    assert "completed" in actions[0].label and "unqualified" in actions[0].label
+    assert "FAIL" not in actions[0].label
+
+
 def test_campaign_configuration_matches_compiler_and_case_order():
     from dataclasses import asdict
     from pathlib import Path

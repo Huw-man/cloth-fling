@@ -189,3 +189,12 @@ terminal evidence remain unchanged. One newly authorized bounded demonstration
 may execute with this mode, using the same physics, fixture, pins and trajectory;
 no tuning, retries or qualification claims. File handoffs must use project-relative
 paths and must not open viewer panes.
+
+That demonstration completed all phases through release and five seconds of
+settling in 20.08 simulated seconds: .979767 coverage, full tabletop containment,
+RMS speed .00005389 m/s, verified pins/release/cleanup. The tug controller found
+the cloth already geometrically taut and added no pull. Drift reached 39.77 mm
+and was logged without stopping. Material peak edge ratio was 1.736297; the known
+timestep discrepancy and unqualified material fidelity remain. Its ledger is
+terminal; see `docs/friction-motion-continued.md` and
+`runs/friction-motion-demo-continued-20261019/`. Historical evidence stays intact.
