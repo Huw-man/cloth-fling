@@ -33,6 +33,9 @@ After making placement quality observational, the
 [continued demonstration](docs/friction-motion-continued.md) completed through
 release and settling with .9798 coverage. Physics and trajectory were unchanged;
 contact qualification remains incomplete.
+The user-selected [frozen post-grasp laydown](docs/frozen-laydown.md) now adopts an
+already-held native grasp and runs this motion without reattachment or a reset.
+Its versioned configuration is `configs/reference-post-grasp-laydown-v1-frozen.json`.
 
 ## Install and check Genesis 1.4.4
 

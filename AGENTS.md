@@ -198,3 +198,18 @@ and was logged without stopping. Material peak edge ratio was 1.736297; the know
 timestep discrepancy and unqualified material fidelity remain. Its ledger is
 terminal; see `docs/friction-motion-continued.md` and
 `runs/friction-motion-demo-continued-20261019/`. Historical evidence stays intact.
+
+## User-frozen post-grasp laydown
+
+The user selected the completed continuation as the frozen laydown to hand off to
+after grasp. `reference_post_grasp_laydown_v1` preserves the reviewed physics,
+trajectory and observational placement policy. The API in
+`cloth_fling.frozen_laydown` adopts the two existing native pins without attach,
+reset, restore or pixel reselection, includes lift/tauten/hold, and owns stepping
+through release/settling and independently certified cleanup. Native pair order is
+negative-to-positive world Y, as in the reviewed reference grasp. See
+`configs/reference-post-grasp-laydown-v1-frozen.json` and `docs/frozen-laydown.md`.
+Configuration and controller hashes are frozen; changes require a new version.
+This is user selection of development evidence, not new contact, varied-grasp or
+learner qualification. Post-grasp lifecycle/target parity is checked offline; no
+new native campaign is implied. Preserve every historical terminal run unchanged.

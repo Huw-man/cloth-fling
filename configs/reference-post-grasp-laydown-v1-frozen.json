@@ -1,0 +1,181 @@
+{
+  "controller": {
+    "airborne_hold_seconds": 3.0,
+    "endpoint_hold_seconds": 1.0,
+    "lift_midpoint_xz_m": [
+      0.1,
+      0.95
+    ],
+    "lift_seconds": 2.0,
+    "pre_tug_stabilize_seconds": 1.0,
+    "preserve_midpoint_y": true,
+    "release_hold_seconds": 0.2,
+    "settle_seconds": 5.0,
+    "tauten_algorithm": "reference_motion._Motion.tauten_cloth",
+    "tug_increment_m": 0.001,
+    "tug_increment_seconds": 0.1,
+    "tug_max_m": 0.02,
+    "tug_slack_chord_arclength": 0.98,
+    "tug_slack_consecutive_samples": 5,
+    "tug_stop_drift_median_m": 0.001,
+    "tug_stop_drift_p95_m": 0.003
+  },
+  "entrypoint": "cloth_fling.frozen_laydown.execute_frozen_laydown",
+  "execution_mode": "demonstration",
+  "handoff": {
+    "existing_native_pins": 2,
+    "includes_lift": true,
+    "initial_hold_seconds": 0.2,
+    "pin_order": "negative_to_positive_world_Y",
+    "reattach": false,
+    "reset_or_restore": false
+  },
+  "implementation_sha256": {
+    "reference_diagonal_motion.py": "15a7edeadf6269eccdd9eeff07b8342cdfd9b603b323e966ec32c587976510b6",
+    "reference_geometry.py": "6eb6085706f7e1dafd7c5254da2087657dd16792496d018ec363b81d82041c74",
+    "reference_leading_motion.py": "6268198c5f424d4a7231635ec9fb18d6ac216979c5b6cc67e319ac56b0231e92",
+    "reference_motion.py": "35900e1a7e6241decd7add9535354825c0239ffde10a99441c07d91ee1112962",
+    "reference_trajectory.py": "29c3bc0cf6480dfe14d6e16a1785523095533512b9170b496b512253717fbf3a",
+    "sim/native_contact.py": "4c01fddddf25722ee6346b1528e1ac2ef073b640a5d17e1f106d1de5320fab19",
+    "sim/position_contact.py": "d21734575d381f49fa68b4abf2ff77d3c5e927badc2ede75e81e3e2c82877f03",
+    "sim/reference.py": "dd2d01c3dde92a6ecf383b59360f72031fb23871313ee86ccad21a276490d356"
+  },
+  "limitations": [
+    "Selected by user review of one favorable-grasp native demonstration; no diverse-grasp or held-out qualification.",
+    "Known half-timestep friction discrepancy remains unresolved.",
+    "Material fidelity is unqualified; demonstrated peak local edge ratio was 1.736296523357076.",
+    "Post-grasp entry is verified offline against the demonstrated controller; no new native campaign is created."
+  ],
+  "placement_quality": "record_only",
+  "reference_evidence": {
+    "configuration_sha256": "5f5d888bcd8395b52e40a67ad0130379acaf910ddd34aa24ac2a7d1ec3b5e777",
+    "coverage_after": 0.9797666666666668,
+    "demonstrated_native_pin_ids": [
+      2488,
+      1190
+    ],
+    "native_code_commit": "f9210143c0e60070c3e2389963fa094523035a10",
+    "outcome": {
+      "path": "action-00.json",
+      "sha256": "57bed447433467ec4eda342f2da2241313583c31114d8f9204cbacd95b4d377d"
+    },
+    "qualification_complete": false,
+    "replay": "runs/friction-motion-demo-continued-20261019-review/combined.mp4",
+    "replay_sha256": "6008883e2819654dfb69946f55940cc81f0ae8c2830ae5407d8b6fd457bdb928",
+    "report_sha256": "7c7c306eee3e2e634e311b3815bf7dacc1718b45f56089f02910d5e15361ebd5",
+    "run": "runs/friction-motion-demo-continued-20261019",
+    "simulated_seconds": 20.080000000001558,
+    "tug_distance_m": 0.0
+  },
+  "scene": {
+    "air_resistance": 0.0,
+    "areal_density_kg_m2": 0.5,
+    "authored_thickness_m": 0.002,
+    "bending_compliance": 1e-05,
+    "bending_relaxation": 0.0,
+    "cloth_center_m": [
+      0.5,
+      0.0,
+      0.311
+    ],
+    "cloth_mass_kg": 0.12,
+    "cloth_size_m": 0.6,
+    "cloth_width_m": 0.4,
+    "contact_profile": "reference_position_coulomb_v1",
+    "controller_dt": 0.02,
+    "coverage_bounds_m": [
+      0.15,
+      0.95,
+      -0.4,
+      0.4
+    ],
+    "coverage_cell_m": 0.002,
+    "grasp_workspace_m": 0.9,
+    "image_size": 256,
+    "kinetic_friction": 0.6,
+    "max_bending_solver_iterations": 1,
+    "max_grasp_separation_m": 0.7,
+    "max_stretch_solver_iterations": 128,
+    "mesh_spacing_m": 0.01,
+    "min_grasp_separation_m": 0.08,
+    "profile": "reference_diagonal_v3",
+    "seed": 0,
+    "sim_dt": 0.001,
+    "static_friction": 0.6,
+    "stretch_compliance": 1e-07,
+    "stretch_relaxation": 0.3,
+    "substeps": 1,
+    "table_center_xy_m": [
+      0.55,
+      0.0
+    ],
+    "table_dimensions_m": [
+      0.8,
+      1.0
+    ],
+    "table_friction": true,
+    "table_kinetic_friction": 0.3375,
+    "table_size_m": 1.2,
+    "table_static_friction": 0.3375,
+    "table_surface_z_m": 0.3,
+    "table_thickness_m": 0.05,
+    "wrinkle_amplitude_m": 0.005,
+    "wrinkle_seed": 7,
+    "wrinkle_waves": 3
+  },
+  "schedule": {
+    "maximum_action_seconds": 35.0,
+    "peak_acceleration_m_s2": 0.14975975273448663,
+    "peak_speed_m_s": 0.2918154382482183,
+    "reserved_after_tauten_seconds": 18.2,
+    "segments": [
+      {
+        "coefficients": [
+          [
+            0.1,
+            0.0,
+            0.95
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            6.799999999999987,
+            0.0,
+            -6.399999999999989
+          ],
+          [
+            -10.199999999999982,
+            -0.0,
+            9.599999999999982
+          ],
+          [
+            4.079999999999993,
+            0.0,
+            -3.8399999999999928
+          ]
+        ],
+        "phase": "diagonal",
+        "seconds": 6.0
+      }
+    ],
+    "tauten_allowance_seconds": 14.6
+  },
+  "schema": "cloth_fling.frozen_post_grasp_laydown.v1",
+  "selection_basis": "user_approved_completed_demonstration",
+  "trajectory": {
+    "diagonal_seconds": 6.0,
+    "endpoint_hold_seconds": 1.0,
+    "endpoint_x_m": 0.78,
+    "max_tug_m": 0.02,
+    "version": "reference_diagonal_v3"
+  },
+  "version": "reference_post_grasp_laydown_v1"
+}

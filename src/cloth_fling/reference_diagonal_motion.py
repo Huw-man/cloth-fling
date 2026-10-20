@@ -271,8 +271,29 @@ def campaign_stopping(outcome):
 
 
 def execute_diagonal_action(
-    env, action, trajectory, *, expected_ids, cleanup_callback, execution_mode="qualification"
+    env,
+    action,
+    trajectory,
+    *,
+    expected_ids,
+    cleanup_callback,
+    execution_mode="qualification",
+    retain_existing_grasp=False,
 ):
+    if retain_existing_grasp:
+        ids = tuple(env.attached_ids)
+        free = np.asarray(env._free(), dtype=bool)
+        if (
+            len(ids) != 2
+            or len(set(ids)) != 2
+            or any(not isinstance(i, (int, np.integer)) or isinstance(i, bool) for i in ids)
+            or ids != tuple(expected_ids)
+            or set(ids) != set(np.flatnonzero(~free))
+        ):
+            # The caller still owns an invalid handoff; do not release or mutate it.
+            raise ValueError("handoff requires exactly the expected two existing native pins")
+        if env.get_positions()[ids[0], 1] > env.get_positions()[ids[1], 1]:
+            raise ValueError("handoff native pins must be ordered from negative to positive Y")
     segments, schedule = diagonal_schedule(trajectory, env.config.controller_dt)
     before = env.observe()
     coverage_before, area_before, flat_area = env.coverage()
@@ -281,11 +302,11 @@ def execute_diagonal_action(
     terminal_state, after = None, None
     release_ordering = []
     try:
-        run.ids = env.attach(action.pixels)
+        run.ids = tuple(env.attached_ids) if retain_existing_grasp else env.attach(action.pixels)
         if run.ids != tuple(expected_ids):
             raise ReferenceMotionFailure("favorable_vertex_identity_mismatch")
         run.target = env.get_positions()[list(run.ids)].copy()
-        run.hold("attach", 0.2)
+        run.hold("grasp_handoff" if retain_existing_grasp else "attach", 0.2)
         midpoint = run.target.mean(axis=0)
         span = float(np.linalg.norm((run.target[1] - run.target[0])[:2]))
         goal = np.array(
@@ -419,6 +440,7 @@ def execute_diagonal_action(
             ),
         },
         evidence={
+            "retained_existing_grasp": retain_existing_grasp,
             "placement_violations": run.placement_violations,
             "cleanup": cleanup,
             "failure": failure,
