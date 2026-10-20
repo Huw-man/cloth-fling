@@ -81,6 +81,14 @@ before executing the adapted segments; no free-particle relocation is permitted.
 The six-second diagonal, two-second drag and complete phase reservation are
 unchanged. V3 code/configuration remain reproducible at `a67963d`.
 
+The bounded v4 check completed both 12 cm drags and settled with footprint centers
+1.38 cm and 3.20 cm from (.55, 0) m. Drag-only coverage gains were +.110200 and
++.043967; full-action random grasps still reduced coverage overall. Native ownership,
+release, cleanup and state continuity passed; peak local edge ratios were 1.684783
+and 2.063633, so material fidelity remains unqualified. The v3 development case and
+v4 correction used 192.471 wall seconds combined, within their shared hour. See
+`docs/image-grasp-pilot.md`; neither run may be resumed or extended.
+
 ## Historical V3 final drag and placement target
 
 The user requested a meaningful final table drag and a centered cloth afterward.
