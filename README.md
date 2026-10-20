@@ -10,6 +10,14 @@ six development bunches qualified, but only five of the required six held-out
 bunches qualified. See [results](docs/milestone3-results.md). Motion and pilot
 behavior remain unqualified; the frozen failed manifest cannot resume simulation.
 
+## Reference towel profile
+
+A separate [reference environment](docs/reference-environment.md) adds the supplied
+0.60 × 0.40 m towel physics, two single-vertex pins, prescribed retained-grasp laydown,
+and learning-ready FlingBot-style RGB grasp action maps. Its bounded entrypoint is
+`cloth-fling reference qualify --output runs/reference-laydown-v1`. Training and
+dynamic-fling reproduction are deferred; this profile does not resume milestone 3.
+
 ## Install and check Genesis 1.4.4
 
 Version 0.2.0 pins **Genesis 1.4.4**, the latest stable release checked on 2026-10-19,

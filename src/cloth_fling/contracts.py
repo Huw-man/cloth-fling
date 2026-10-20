@@ -79,7 +79,7 @@ class SceneConfig:
             raise ValueError("max_stretch_solver_iterations must be an integer in [1, 128]")
         if not isinstance(self.table_friction, bool):
             raise ValueError("table_friction must be a boolean")
-        if self.contact_profile not in ("legacy_mg_v1", "native_coulomb_v1", "native_coulomb_v2"):
+        if self.contact_profile not in ("legacy_mg_v1", "native_coulomb_v1", "native_coulomb_v2", "reference_split_v1"):
             raise ValueError("unsupported contact_profile")
         for name in ("table_static_friction", "table_kinetic_friction"):
             value = getattr(self, name)
@@ -185,3 +185,88 @@ class ClothBackend(Protocol):
     def snapshot(self) -> dict[str, Any]: ...
     def restore(self, state: dict[str, Any]) -> Observation: ...
     def close(self) -> None: ...
+
+
+@dataclass(frozen=True)
+class ReferenceSceneConfig(SceneConfig):
+    """Independent reference towel profile; no inherited square qualification."""
+
+    profile: str = "reference_laydown_v1"
+    cloth_size_m: float = 0.60
+    areal_density_kg_m2: float = 0.5
+    sim_dt: float = 0.001
+    max_stretch_solver_iterations: int = 128
+    static_friction: float = 0.6
+    kinetic_friction: float = 0.6
+    contact_profile: str = "reference_split_v1"
+    table_static_friction: float | None = 0.3375
+    table_kinetic_friction: float | None = 0.3375
+    max_grasp_separation_m: float = 0.70
+    cloth_width_m: float = 0.40
+    cloth_mass_kg: float = 0.12
+    authored_thickness_m: float = 0.002
+    cloth_center_m: tuple[float, float, float] = (0.50, 0.0, 0.311)
+    table_dimensions_m: tuple[float, float] = (0.80, 1.0)
+    table_center_xy_m: tuple[float, float] = (0.55, 0.0)
+    table_surface_z_m: float = 0.30
+    table_thickness_m: float = 0.05
+    coverage_bounds_m: tuple[float, float, float, float] = (0.15, 0.95, -0.40, 0.40)
+    coverage_cell_m: float = 0.002
+    controller_dt: float = 0.020
+    substeps: int = 1
+    max_bending_solver_iterations: int = 1
+    stretch_relaxation: float = 0.3
+    bending_relaxation: float = 0.0
+    wrinkle_amplitude_m: float = 0.005
+    wrinkle_seed: int = 7
+    wrinkle_waves: int = 3
+
+    def __post_init__(self):
+        super().__post_init__()
+        for name, count in (("cloth_center_m", 3), ("table_dimensions_m", 2),
+                            ("table_center_xy_m", 2), ("coverage_bounds_m", 4)):
+            value = tuple(getattr(self, name))
+            if len(value) != count or not all(math.isfinite(x) for x in value):
+                raise ValueError(f"invalid {name}")
+            object.__setattr__(self, name, value)
+        if not all(math.isfinite(value) for value in asdict(self).values()
+                   if isinstance(value, (int, float))):
+            raise ValueError("reference numeric settings must be finite")
+        if self.profile != "reference_laydown_v1" or self.contact_profile != "reference_split_v1":
+            raise ValueError("reference profile requires its split contact operator")
+        for name in ("cloth_width_m", "cloth_mass_kg", "authored_thickness_m",
+                     "table_thickness_m", "coverage_cell_m", "controller_dt"):
+            if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be finite and positive")
+        for name in ("stretch_relaxation", "bending_relaxation", "wrinkle_amplitude_m"):
+            if not math.isfinite(getattr(self, name)) or getattr(self, name) < 0:
+                raise ValueError(f"invalid {name}")
+        for name in ("substeps", "max_bending_solver_iterations", "wrinkle_waves"):
+            if type(getattr(self, name)) is not int or getattr(self, name) < 1:
+                raise ValueError(f"invalid {name}")
+        if type(self.wrinkle_seed) is not int or self.wrinkle_seed < 0:
+            raise ValueError("invalid wrinkle seed")
+        ticks = self.controller_dt / self.sim_dt
+        if self.substeps != 1 or not math.isclose(ticks, round(ticks)) or ticks < 1:
+            raise ValueError("reference controller interval must contain whole physics steps")
+        if not math.isclose(self.cloth_mass_kg / (self.cloth_size_m * self.cloth_width_m),
+                            self.areal_density_kg_m2):
+            raise ValueError("reference surface density and total mass disagree")
+        x0, x1, y0, y1 = self.coverage_bounds_m
+        if x0 >= x1 or y0 >= y1 or min(self.table_dimensions_m) <= 0:
+            raise ValueError("invalid reference bounds")
+
+    @property
+    def table_bounds_m(self):
+        x, y = self.table_center_xy_m
+        sx, sy = self.table_dimensions_m
+        return (x - sx / 2, x + sx / 2, y - sy / 2, y + sy / 2)
+
+    def to_dict(self):
+        return asdict(self)
+
+
+def scene_config_from_dict(data):
+    """Decode historical square configurations or the explicit reference profile."""
+    cls = ReferenceSceneConfig if data.get("profile") == "reference_laydown_v1" else SceneConfig
+    return cls(**data)
