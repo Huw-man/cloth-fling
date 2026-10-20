@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from cloth_fling import __version__
-from cloth_fling.contracts import SceneConfig
+from cloth_fling.contracts import ReferenceSceneConfig, SceneConfig, scene_config_from_dict
 
 
 def load_config(path: str | None) -> SceneConfig:
@@ -21,10 +21,11 @@ def load_config(path: str | None) -> SceneConfig:
     data = json.loads(Path(path).read_text())
     if not isinstance(data, dict):
         raise ValueError("scene configuration must be a JSON object")
-    unknown = set(data) - {field.name for field in fields(SceneConfig)}
+    cls = ReferenceSceneConfig if data.get("profile") == "reference_laydown_v1" else SceneConfig
+    unknown = set(data) - {field.name for field in fields(cls)}
     if unknown:
         raise ValueError(f"unknown configuration fields: {sorted(unknown)}")
-    return SceneConfig(**data)
+    return scene_config_from_dict(data)
 
 
 def doctor_report() -> dict[str, Any]:
@@ -76,8 +77,18 @@ def load_reset(path: Path) -> dict[str, Any]:
 def _backend(args: argparse.Namespace):
     from cloth_fling.sim.backend import GenesisBackend
 
-    return GenesisBackend(
-        load_config(args.config),
+    config = load_config(args.config)
+    if args.profile == "reference":
+        if args.config and not isinstance(config, ReferenceSceneConfig):
+            raise ValueError("reference profile conflicts with square configuration")
+        config = config if args.config else ReferenceSceneConfig()
+    factory = GenesisBackend
+    if isinstance(config, ReferenceSceneConfig):
+        from cloth_fling.sim.reference import ReferenceBackend
+
+        factory = ReferenceBackend
+    return factory(
+        config,
         backend=args.backend,
         headless=True,
         appearance=load_appearance(args),
@@ -112,14 +123,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     resets = sub.add_parser("resets", help="Generate a bounded reset and save its state")
     resets.add_argument("--output", type=Path, required=True)
-    resets.add_argument("--kind", choices=("flat", "drop", "fold"), default="fold")
+    resets.add_argument("--kind", choices=("flat", "drop", "fold", "authored"), default="fold")
     resets.add_argument("--seed", type=int, default=0)
 
     diagnose = sub.add_parser("diagnose", help="Compare primitives on one restored fixture")
     diagnose.add_argument("--output", type=Path, required=True)
     diagnose.add_argument("--seed", type=int, default=0)
     diagnose.add_argument("--primitive-config", help="Separate motion/settling JSON overrides")
-    diagnose.add_argument("--reset-kind", choices=("flat", "drop", "fold"), default="fold")
+    diagnose.add_argument("--reset-kind", choices=("flat", "drop", "fold", "authored"), default="fold")
     diagnose.add_argument("--reset-dir", type=Path, help="Compare from a saved fixture")
     diagnose.add_argument("--record-video", action="store_true", help="Native debug captures")
     diagnose.add_argument(
@@ -144,7 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument(
         "--reset-dir", type=Path, help="Restore a saved reset at episode boundaries"
     )
-    collect.add_argument("--reset-kind", choices=("flat", "drop", "fold"), default="fold")
+    collect.add_argument("--reset-kind", choices=("flat", "drop", "fold", "authored"), default="fold")
     collect.add_argument(
         "--policy", choices=("uniform_valid", "geometry_guided"), default="uniform_valid"
     )
@@ -154,6 +165,12 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--cloth-id")
     collect.add_argument("--episode-metadata", type=Path, help="Episode metadata JSON object")
     collect.add_argument("--settled-coverage-threshold", type=float)
+
+    reference = sub.add_parser("reference", help="Bounded reference towel qualification")
+    reference.add_argument("stage", choices=("qualify",))
+    reference.add_argument("--output", type=Path, required=True)
+    reference.add_argument("--previous", type=Path, help="Carry all charges from a terminal setup attempt")
+    reference.add_argument("--backend", choices=("gpu", "cpu"), default="gpu")
 
     benchmark = sub.add_parser("benchmark", help="Bounded milestone-3 benchmark")
     benchmark.add_argument("stage", choices=("prepare", "qualify", "pilot", "report"))
@@ -168,6 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--revision-reason", help="Measured failure addressed by revision")
 
     for command in (doctor, resets, diagnose, collect):
+        command.add_argument("--profile", choices=("square", "reference"), default="square")
         command.add_argument("--config", help="Scene JSON; default: native_coulomb_v2")
         command.add_argument("--backend", choices=("gpu", "cpu"), default="gpu")
         _appearance_options(command)
@@ -202,6 +220,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "reference":
+            from cloth_fling.reference_run import run_reference_qualification
+
+            report = run_reference_qualification(args.output, backend=args.backend, previous=args.previous)
+            print(json.dumps(report, indent=2, allow_nan=False))
+            return 0 if report["stage_passed"] else 1
         if args.command == "benchmark":
             from cloth_fling.benchmark_run import run_benchmark_stage
 
@@ -276,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.probe:
                 env = _backend(args)
                 try:
-                    obs = env.reset(kind="flat")
+                    obs = env.reset(kind="authored" if isinstance(env.config, ReferenceSceneConfig) else "flat")
                     report["simulation_probed"] = True
                     report["scene"] = {
                         "rgb_shape": list(obs.rgb.shape),
@@ -296,6 +320,10 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("episodes must be positive and max-actions must be in [1, 10]")
             if not 0 < args.max_wall_seconds <= 86400:
                 raise ValueError("max-wall-seconds must be in (0, 86400]")
+        if args.command in ("collect", "diagnose") and (
+            args.profile == "reference" or isinstance(load_config(args.config), ReferenceSceneConfig)
+        ):
+            raise ValueError("use 'reference qualify' for the bounded reference campaign")
         primitive_config = None
         if args.command in ("collect", "diagnose"):
             from cloth_fling.sim.primitives import PrimitiveConfig

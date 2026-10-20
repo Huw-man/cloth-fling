@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from cloth_fling.contracts import SceneConfig
+from cloth_fling.contracts import SceneConfig, scene_config_from_dict
 from cloth_fling.data import read_rgb, read_support, read_transitions
 from cloth_fling.data.storage import relative_path
 from cloth_fling.rendering import VideoRecorder, file_sha256
@@ -54,7 +54,7 @@ def validate_action(action):
         raise ValueError("snapshot positions must be N x 3")
     if not np.isfinite(positions).all():
         raise ValueError("snapshot positions must be finite")
-    SceneConfig(**json.loads(str(action.state["config_json"])))
+    scene_config_from_dict(json.loads(str(action.state["config_json"])))
     previous = -1.0
     if not action.traces:
         # Static terminal geometry is explicit, never fabricated action motion.
@@ -107,7 +107,34 @@ def load_replay(source, *, episode_id=None):
     """Offline loader. Retain invalid attempts and group dataset rows by episode/step."""
     source = Path(source).resolve()
     actions = []
-    if source.is_dir() and (source / "manifest.json").is_file():
+    if source.is_dir() and (source / "reference-report.json").is_file():
+        from cloth_fling.data.storage import read_bundle
+
+        if episode_id is not None:
+            raise ValueError("episode_id selection applies to datasets only")
+        document = json.loads((source / "reference-report.json").read_text())
+
+        def checked_bundle(reference):
+            path = relative_path(source, reference["path"])
+            if file_sha256(path) != reference["sha256"]:
+                raise ValueError("reference bundle hash mismatch")
+            bundle = json.loads(path.read_text())
+            arrays = bundle.get("arrays")
+            if arrays and file_sha256(relative_path(source, arrays["path"])) != arrays["sha256"]:
+                raise ValueError("reference arrays hash mismatch")
+            return read_bundle(source, reference["path"])
+
+        run = checked_bundle(document["single_action"])
+        state = checked_bundle(document["initial_state"])
+        evidence = run["evidence"]
+        actions.append(validate_action(ReplayAction(
+            label="reference controlled laydown", state=state,
+            traces=evidence.get("phase_traces", []), duration=run["simulated_seconds"],
+            execution_valid=run["execution_valid"], reason=run["reason"], source=run,
+            original_rgb={}, table_height_m=0.30)))
+        origin = {"format": "reference_diagnostic",
+                  "source_reference_report_sha256": file_sha256(source / "reference-report.json")}
+    elif source.is_dir() and (source / "manifest.json").is_file():
         manifest = json.loads((source / "manifest.json").read_text())
         episodes = {e["episode_id"]: e for e in manifest["episodes"]}
         rows = sorted(
@@ -328,13 +355,19 @@ def render_replay(
     ) as recorder:
         for index, action in enumerate(actions):
             template = json.loads(str(action.state["config_json"]))
-            if native_template:
+            reference = template.get("profile") == "reference_laydown_v1"
+            if native_template and not reference:
                 # The new backend rejects archival contact laws. This selects
                 # its current template only; replay never executes that law.
                 template["contact_profile"] = "native_coulomb_v2"
-            config = SceneConfig(**template)
+            config = scene_config_from_dict(template) if reference else SceneConfig(**template)
+            factory = backend_factory
+            if native_template and reference:
+                from cloth_fling.sim.reference import ReferenceBackend
+
+                factory = ReferenceBackend
             kwargs = {} if appearance is None else {"appearance": appearance}
-            with backend_factory(config, **kwargs) as env:
+            with factory(config, **kwargs) as env:
                 # Defense in depth: refuse scene AND wrapper stepping/reset paths.
                 env.step = _forbidden_step
                 env.reset = _forbidden_step

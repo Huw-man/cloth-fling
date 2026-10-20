@@ -107,3 +107,20 @@ Do not disable agent sandbox/approval protections. Use `UV_CACHE_DIR=/tmp/cloth-
 - Stage 2 agent: `src/cloth_fling/data/`, `collection.py`, `tests/test_data*`,
   `tests/test_collection*`, `docs/dataset.md`.
 - Coordinator: package configuration, contracts, CLI, integration, lock, README.
+
+
+## Reference towel profile (new authorized work)
+
+The user approved a separate reference setup on Genesis 1.4.4: 0.60 × 0.40 m
+wrinkled towel, two single-vertex hard pins, reference split tabletop friction,
+and prescribed lift/tauten/hold/laydown/drag/release. The grasp action interface is
+FlingBot-style transformed RGB value maps; network training and dynamic-fling
+reproduction remain deferred. See `docs/reference-environment.md`.
+
+This profile does not change or resume milestone 3. Its local qualification is
+bounded to six diagnostics and two episodes of at most three actions, 35 simulated/
+180 wall seconds per action and one hour total simulator wall. No physics/motion
+tuning after inspecting qualification outcomes. All failed evidence is preserved.
+The first motion reached the solver boundary during drag after successful full-cloth
+airborne hold; placement is unqualified and continuity was not evaluated. See
+`docs/reference-results.md`. Do not infer diverse-reset or learned-policy success.
