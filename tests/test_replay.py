@@ -60,7 +60,7 @@ def traces():
     ]
 
 
-def dataset(root, *, valid=True, with_traces=True):
+def dataset(root, *, valid=True, with_traces=True, config=None):
     before = Observation("before", np.full((16, 16, 3), 100, dtype=np.uint8))
     after = Observation("after", np.full((16, 16, 3), 120, dtype=np.uint8))
     result = ActionOutcome(
@@ -80,9 +80,15 @@ def dataset(root, *, valid=True, with_traces=True):
         truncated=valid,
         evidence={"phase_traces": traces() if with_traces else []},
     )
+    state = snapshot()
+    if config is not None:
+        state["config_json"] = json.dumps(config.to_dict())
+        state["state_hash"] = _state_hash(state)
     with DatasetWriter(root) as writer:
-        eid = writer.save_reset(before, seed=0, config=SceneConfig(image_size=16), state=snapshot())
-        writer.append_outcome(eid, result, final_state=snapshot())
+        eid = writer.save_reset(
+            before, seed=0, config=config or SceneConfig(image_size=16), state=state
+        )
+        writer.append_outcome(eid, result, final_state=state)
 
 
 def diagnostic(root):
@@ -136,6 +142,16 @@ def test_empty_trajectory_is_explicit_terminal_only(tmp_path):
     actions, _ = load_replay(root)
     assert actions[0].traces[0]["phase"] == "terminal_only_no_trajectory"
     assert not actions[0].traces[0]["attachment_ids"]
+
+
+def test_failed_reference_action_uses_saved_table_height_without_motion_metadata(tmp_path):
+    from cloth_fling.contracts import ReferenceSceneConfig
+
+    root = tmp_path / "data"
+    dataset(root, valid=False, with_traces=False, config=ReferenceSceneConfig(image_size=16))
+    actions, _ = load_replay(root)
+    assert actions[0].table_height_m == 0.3
+    assert actions[0].traces[0]["phase"] == "terminal_only_no_trajectory"
 
 
 def test_hold_sampling_uses_past_trace_and_terminal_without_interpolation():
