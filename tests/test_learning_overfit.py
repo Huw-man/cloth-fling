@@ -272,3 +272,69 @@ def test_offline_import_and_cli_do_not_import_simulator_or_torch():
         "assert 'torch' not in sys.modules and 'genesis' not in sys.modules"
     )
     subprocess.run([sys.executable, "-c", script], check=True)
+
+
+@pytest.mark.parametrize("target", [0.8, 0.98])
+def test_versioned_target_preserves_old_reports(tmp_path, target):
+    journal = overfit.Journal(tmp_path / "run", coverage_target=target)
+    assert overfit.read(journal.root, "protocol.json") == overfit.protocol_for(target)
+    report = overfit.report(journal.root)
+    assert report["coverage_target"] == target
+    assert report["primary_milestone"]["coverage_target"] == 0.8
+    assert not report["integrity_errors"]
+    assert not report["qualified"] and not report["primary_milestone"]["confirmed"]
+    assert overfit.protocol_for(0.98) == overfit.PROTOCOL
+
+
+def test_default_80_target_reaches_collector_and_success_gate(tmp_path, monkeypatch):
+    journal = overfit.Journal(tmp_path / "run")
+    journal.kind = "check"
+    captured = {}
+
+    def episode(*args, **kwargs):
+        captured.update(kwargs)
+        result = successful_result()
+        result["actions"][0]["coverage_after"] = 0.8
+        return result
+
+    monkeypatch.setattr(overfit.pilot, "episode", episode)
+    result = overfit.run_episode(None, journal, {}, {}, "check")
+    assert captured["coverage_stop"] == 0.8 and captured["require_containment"]
+    assert result["success"]
+    result["actions"][0]["coverage_after"] = 0.7999
+    assert not overfit.episode_succeeded(result, coverage_target=0.8)
+
+
+def test_first_80_hit_survives_later_recorded_failure_without_relabeling():
+    result = successful_result()
+    result["actions"][0]["coverage_after"] = 0.837
+    failed_action = copy.deepcopy(result["actions"][0])
+    failed_action["coverage_after"] = 0.3
+    failed_action["diagnostics"]["settled"] = False
+    result["actions"].append(failed_action)
+    result["failed"] = True
+    original = copy.deepcopy(result)
+    assert overfit.first_target_hit(result) == 1
+    assert overfit.first_target_hit(result, 0.98) is None
+    assert not overfit.episode_succeeded(result, coverage_target=0.8)
+    assert result == original
+    result["actions"][0]["diagnostics"]["final_table_containment"] = 0.99
+    assert overfit.first_target_hit(result) is None
+
+
+def test_cli_80_default_and_explicit_legacy_target():
+    from cloth_fling.cli import build_parser
+
+    parser = build_parser()
+    assert parser.parse_args(["learning-overfit", "run"]).coverage_target == 0.8
+    assert (
+        parser.parse_args(
+            [
+                "learning-overfit",
+                "run",
+                "--coverage-target",
+                "0.98",
+            ]
+        ).coverage_target
+        == 0.98
+    )

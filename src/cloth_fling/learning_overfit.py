@@ -50,6 +50,17 @@ PROTOCOL = {
 write, read, claim = pilot.write, pilot.read, pilot.claim
 
 
+def protocol_for(coverage_target):
+    """Keep the executed 98% protocol reproducible; new runs default to 80%."""
+    if coverage_target not in (0.8, 0.98):
+        raise ValueError("supported coverage targets are .80 and .98")
+    return dict(
+        PROTOCOL,
+        version="single_reset_overfit_v2_80" if coverage_target == 0.8 else PROTOCOL["version"],
+        coverage_stop=coverage_target,
+    )
+
+
 def schedule():
     result = [("exploration", "collection", 20), ("fit-00", "fit", 0), ("check-00", "check", 1)]
     for index in range(1, 8):
@@ -66,7 +77,8 @@ def schedule():
 class Journal:
     """New-root-only journal. Intent files remain authoritative after partial writes."""
 
-    def __init__(self, root):
+    def __init__(self, root, *, coverage_target=0.8):
+        self.protocol = protocol_for(coverage_target)
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=False)
         self.started = time.monotonic()
@@ -81,7 +93,7 @@ class Journal:
             "episodes": [],
         }
         self.save()
-        write(self.root, "protocol.json", PROTOCOL)
+        write(self.root, "protocol.json", self.protocol)
         write(self.root, "implementation.json", pilot.implementation_identity())
         write(self.root, "runtime.json", runtime_provenance())
         write(self.root, "frozen-laydown.json", frozen_laydown_spec())
@@ -122,7 +134,7 @@ class Journal:
     def operation(self, stage, kind):
         self.stage, self.kind = stage, kind
         self.check()
-        if read(self.root, "protocol.json") != PROTOCOL:
+        if read(self.root, "protocol.json") != self.protocol:
             raise ValueError("single-reset protocol changed")
         if read(self.root, "implementation.json") != pilot.implementation_identity():
             raise ValueError("single-reset implementation changed")
@@ -192,20 +204,37 @@ def prepare_fixture(journal, source_root=SOURCE_ROOT):
     return case, copied
 
 
-def episode_succeeded(result):
-    if result["failed"] or result.get("fatal") or not 1 <= len(result["actions"]) <= 3:
-        return False
-    last = result["actions"][-1]
-    d = last["diagnostics"]
+def action_reaches_target(action, coverage_target):
+    d = action.get("diagnostics", {})
     return bool(
-        last["execution_valid"]
+        action.get("execution_valid")
         and d.get("settled") is True
-        and last["coverage_after"] is not None
-        and last["coverage_after"] >= 0.98
+        and action.get("coverage_after") is not None
+        and action["coverage_after"] >= coverage_target
         and d.get("final_table_containment") == 1.0
         and d.get("final_rms_speed_m_s", float("inf")) <= 0.01
         and d.get("terminal_observation_valid") is not False
     )
+
+
+def first_target_hit(result, coverage_target=0.8):
+    """One-based action index; later recorded failures do not erase an earlier hit."""
+    if not 1 <= len(result["actions"]) <= 3:
+        return None
+    return next(
+        (
+            i + 1
+            for i, a in enumerate(result["actions"])
+            if action_reaches_target(a, coverage_target)
+        ),
+        None,
+    )
+
+
+def episode_succeeded(result, *, coverage_target=0.98):
+    if result["failed"] or result.get("fatal") or not 1 <= len(result["actions"]) <= 3:
+        return False
+    return action_reaches_target(result["actions"][-1], coverage_target)
 
 
 def run_episode(env, journal, case, fixture, name, *, predict=None, epsilon=1.0):
@@ -219,11 +248,11 @@ def run_episode(env, journal, case, fixture, name, *, predict=None, epsilon=1.0)
         predict=predict,
         epsilon=epsilon,
         seed=1001 + len(journal.document["episodes"]),
-        coverage_stop=0.98,
+        coverage_stop=journal.protocol["coverage_stop"],
         require_containment=True,
         reserve_seconds=journal.reserve,
     )
-    result["success"] = episode_succeeded(result)
+    result["success"] = episode_succeeded(result, coverage_target=journal.protocol["coverage_stop"])
     result["kind"] = journal.kind
     write(journal.root / "episodes" / name, "result.json", result)
     journal.document["episodes"].append(name)
@@ -371,6 +400,8 @@ def report(root, *, verify=True):
     """Read-only verification; callers may persist the returned report separately."""
     root = Path(root)
     ledger = read(root, "ledger.json")
+    protocol = read(root, "protocol.json")
+    coverage_target = protocol.get("coverage_stop")
     errors = []
     intents = [json.loads(p.read_text()) for p in sorted((root / "action-intents").glob("*.json"))]
     if intents != ledger["actions"]:
@@ -391,7 +422,7 @@ def report(root, *, verify=True):
     if ledger["charged_seconds"] > WALL_SECONDS:
         errors.append("wall limit exceeded")
     if verify:
-        if read(root, "protocol.json") != PROTOCOL:
+        if coverage_target not in (0.8, 0.98) or protocol != protocol_for(coverage_target):
             errors.append("protocol changed")
         for stage in ledger["stages"]:
             if stage["status"] != "complete":
@@ -411,11 +442,15 @@ def report(root, *, verify=True):
                 errors.append(f"cleanup: {result['episode']}")
             if read(folder, "restoration.json") != {"passed": True, "state_hash": STATE_HASH}:
                 errors.append(f"restoration: {result['episode']}")
-            if result["success"] != episode_succeeded(result):
+            if result["success"] != episode_succeeded(result, coverage_target=coverage_target):
                 errors.append(f"success inconsistent: {result['episode']}")
-            if result["success"]:
+            success_steps = {len(result["actions"]) - 1} if result["success"] else set()
+            primary_hit = first_target_hit(result)
+            if primary_hit is not None:
+                success_steps.add(primary_hit - 1)
+            for step in sorted(success_steps):
                 rows = read_transitions(dataset).to_pylist()
-                native = read_support(dataset, rows[-1]["final_state_path"])
+                native = read_support(dataset, rows[step]["final_state_path"])
                 config = scene_config_from_dict(json.loads(native["config_json"]))
                 import numpy as np
 
@@ -427,9 +462,19 @@ def report(root, *, verify=True):
                 if (
                     not contained
                     or not native["free"].all()
+                    or not np.isfinite(p).all()
+                    or not np.isfinite(v).all()
                     or np.sqrt(np.mean(np.sum(v * v, axis=1))) > 0.01
                 ):
                     errors.append(f"native success state: {result['episode']}")
+                cleanup = read(folder / f"action-{step:02d}", "action-00-cleanup.json")
+                if (
+                    not cleanup["passed"]
+                    or not cleanup["native_free"]
+                    or not cleanup["release"]["passed"]
+                    or cleanup["release"]["velocity_error_m_s"] > 1e-4
+                ):
+                    errors.append(f"action cleanup: {result['episode']}/{step}")
         if (root / "scene-cleanup.json").exists() and not read(root, "scene-cleanup.json")[
             "passed"
         ]:
@@ -457,6 +502,16 @@ def report(root, *, verify=True):
         and (root / "scene-cleanup.json").exists()
         and (root / "replays.json").exists()
     )
+    primary_hits = [
+        {
+            "episode": r["episode"],
+            "kind": r["kind"],
+            "action": hit,
+            "coverage": r["actions"][hit - 1]["coverage_after"],
+        }
+        for r in results
+        if (hit := first_target_hit(r)) is not None
+    ]
     return {
         "status": ledger["status"],
         "outcome": ledger["outcome"],
@@ -466,7 +521,24 @@ def report(root, *, verify=True):
         "claimed_actions": max(len(intents), len(ledger["actions"])),
         "completed_episodes": len(results),
         "charged_seconds": ledger["charged_seconds"],
-        "coverage_target": 0.98,
+        "coverage_target": coverage_target,
+        "primary_milestone": {
+            "coverage_target": 0.8,
+            "assessment": "first settled contained hit within three actions",
+            "retrospective_early_stop": coverage_target != 0.8,
+            "hits": primary_hits,
+            "greedy_reached": any(h["kind"] == "check" for h in primary_hits),
+            "confirmed": qualified,
+            "best_settled_greedy_coverage": max(
+                (
+                    a["coverage_after"]
+                    for r in checks
+                    for a in r["actions"]
+                    if action_reaches_target(a, 0.0)
+                ),
+                default=None,
+            ),
+        },
         "maximum_actions_per_episode": 3,
         "best_greedy_coverage": max((r["score"] for r in checks), default=None),
         "maximum_material_edge_ratio": max(
@@ -490,8 +562,9 @@ def report(root, *, verify=True):
     }
 
 
-def run(root, *, backend_factory=None):
-    journal = Journal(root)  # Existing roots fail before any lease, scene or reporting mutation.
+def run(root, *, backend_factory=None, coverage_target=0.8):
+    # Existing roots fail before any lease, scene or reporting mutation.
+    journal = Journal(root, coverage_target=coverage_target)
     env = None
     error = None
     try:
@@ -589,8 +662,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("run", "report"))
     parser.add_argument("--output", type=Path, default=Path(DEFAULT_OUTPUT))
+    parser.add_argument("--coverage-target", type=float, choices=(0.8, 0.98), default=0.8)
     args = parser.parse_args(argv)
-    result = run(args.output) if args.command == "run" else report(args.output)
+    result = (
+        run(args.output, coverage_target=args.coverage_target)
+        if args.command == "run"
+        else report(args.output)
+    )
     print(json.dumps(result, indent=2))
     return 0 if result["status"] == "complete" and not result["integrity_errors"] else 1
 

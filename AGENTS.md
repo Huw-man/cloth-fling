@@ -358,7 +358,7 @@ reopen this experiment or alter its preserved executed source identity.
 ## Single-reset overfitting (new authorization)
 
 The user authorized `docs/single-reset-overfit.md`: learn RGB grasps from scratch on
-the exact archived `fold-50-+00` reset with frozen v4 motion and physics. Reach >=.98
+the exact archived `fold-50-+00` reset with frozen v4 motion and physics. Reach >=.80
 settled coverage with full containment in at most three continuous actions. The
 first passing greedy checkpoint freezes and must pass two further confirmations.
 At most 300 action attempts and six hours total execution; reserve the final hour
@@ -366,3 +366,10 @@ for confirmations/evidence. Use `runs/single-reset-overfit-v1/`, immutable inten
 accounting and the exclusive RTX 5080 lease. No uncertain retries, fixture changes,
 reopening prior campaigns, broader resets, cloud, hardware or publication. Report
 material strain separately and give project-relative replay paths without panes.
+
+The user changed the primary milestone from .98 to .80 during the first run.
+Preserve that run's original .98 protocol, stopping rule and executed source;
+assess the first settled, contained .80 hit within each saved episode separately.
+Future runs default to versioned .80 early stopping; explicit .98 reproduction
+remains supported. This amendment does not authorize a restart, more actions or
+more wall time. An exploratory .80 hit does not qualify the learned selector.
