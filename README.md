@@ -23,6 +23,8 @@ Its [frozen favorable-grasp trajectory passed three confirmations](docs/referenc
 The new [progressive diagonal/contact implementation](docs/reference-diagonal.md)
 adds position-level friction and a slack-taking tug; its first contact campaign is
 [incomplete](docs/reference-diagonal-results.md), with no motion trials executed.
+The subsequent [requested one-shot demonstration](docs/reference-diagonal-demo.md)
+also stopped at contact qualification: sliding failed the half-timestep check.
 
 ## Install and check Genesis 1.4.4
 

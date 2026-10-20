@@ -160,3 +160,11 @@ No motion trials or confirmations ran. The airborne case now ends at .3 s and ha
 CPU regression coverage, but has not been rerun on GPU. Do not resume or extend the
 closed campaign or infer full contact/motion qualification. See
 `docs/reference-diagonal-results.md` and the preserved original source/artifacts.
+
+The user's subsequent request to perform a fling with the new friction/laydown
+authorized a separate bounded demonstration. Its corrected contact gate passed
+13/14 executed cases, then failed above-threshold breakaway at half the timestep
+(0.183 mm travel versus 56.787 mm at the normal timestep). No motion ran and the
+one-shot native ledger is closed. Preserve this failure separately; do not resume
+either terminal run or infer contact qualification. See
+`docs/reference-diagonal-demo.md`.
