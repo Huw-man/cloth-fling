@@ -178,3 +178,8 @@ uv run --locked --extra dev pytest -m 'not gpu'
 
 GPU checks require the coordinator's exclusive lease. Package 0.2.0 is a local version
 boundary; this migration creates no tag or published release.
+
+The bounded [near-half-fold pilot](docs/near-half-fold-pilot.md) tests the RGB learner
+on six training, two validation and four held-out near-half-fold fixtures, with
+80% measured early stopping and a 216-action ceiling. Run with
+`cloth-fling learning-family run`; use `learning-family report` for offline evidence.
