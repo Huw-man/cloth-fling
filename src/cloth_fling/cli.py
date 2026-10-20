@@ -214,6 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
     family = sub.add_parser("learning-family", help="Bounded near-half-fold RGB pilot")
     family.add_argument("stage_command", choices=("run", "report"))
     family.add_argument("--output", type=Path, default=Path("runs/near-half-fold-pilot-v1"))
+    family.add_argument("--prepared-from", type=Path)
 
     overfit = sub.add_parser("learning-overfit", help="Overfit one reset within three actions")
     overfit.add_argument("stage_command", choices=("run", "report"))
@@ -271,7 +272,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "learning-family":
             from cloth_fling.learning_family import main as family_main
 
-            return family_main([args.stage_command, "--output", str(args.output)])
+            forwarded = [args.stage_command, "--output", str(args.output)]
+            if args.prepared_from is not None:
+                forwarded += ["--prepared-from", str(args.prepared_from)]
+            return family_main(forwarded)
         if args.command == "learning-overfit":
             from cloth_fling.learning_overfit import main as overfit_main
 

@@ -217,3 +217,171 @@ def test_report_preserves_unfinalized_dataset_accounting(tmp_path):
     assert report["episodes"][0]["finalized"] is False
     assert any("uncertain episode" in error for error in report["integrity_errors"])
     assert not any("intent/row" in error for error in report["integrity_errors"])
+
+
+@pytest.mark.parametrize("stage", ["exploration", "refresh", "validation", "test"])
+def test_real_collection_does_not_conflict_with_stage_watchdog(tmp_path, stage):
+    import signal
+
+    journal = family.Journal(tmp_path / "run")
+    # Seal preceding empty CPU stages, then enter the actual collection context.
+    for previous in family.STAGES[: family.STAGES.index(stage)]:
+        with journal.operation(previous):
+            pass
+    with journal.operation(stage):
+        assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+        report = collect_episodes(
+            CoverageEnv(initial=0.5),
+            tmp_path / "dataset",
+            max_actions=3,
+            selector=select,
+            executor=advancing_executor([0.81]),
+            settled_coverage_threshold=0.8,
+        )
+        assert report["reset_failures"] == 0 and report["attempts"] == 1
+        assert report["episode_reports"][0]["end_reason"] == "settled_coverage_threshold"
+    assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+
+
+def test_prepare_and_fit_keep_deadline_watchdogs(tmp_path):
+    import signal
+
+    journal = family.Journal(tmp_path / "run")
+    for stage in family.STAGES[:3]:
+        with journal.operation(stage):
+            assert (signal.getitimer(signal.ITIMER_REAL)[0] > 0) == (stage != "exploration")
+        assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+
+
+def test_report_exposes_reset_timer_failure(tmp_path):
+    import time
+
+    from cloth_fling.benchmark_run import _reservation_deadline
+
+    journal = prepared(tmp_path)
+    job = family.episode_schedule("exploration")[0]
+    folder = journal.root / "episodes" / job["episode"]
+    family.claim(folder / "intent.json", job)
+    with _reservation_deadline(time.monotonic() + 10):
+        collected = collect_episodes(
+            CoverageEnv(),
+            folder / "dataset",
+            max_actions=1,
+            selector=select,
+            executor=advancing_executor([0.81]),
+        )
+    assert collected["reset_failures"] == 1 and collected["attempts"] == 0
+    family.write(journal.root, "scene-cleanup.json", {"passed": True})
+    report = family.report(journal.root)
+    assert report["episodes"][0]["reset_errors"] == [
+        "RuntimeError: collection requires an unused process real-time timer"
+    ]
+    assert report["claimed_actions"] == report["dataset_rows"] == 0
+
+
+def recovery_source(tmp_path, monkeypatch):
+    import time
+
+    from cloth_fling.benchmark_run import _reservation_deadline
+    from cloth_fling.data.storage import file_sha256
+
+    root = tmp_path / "failed"
+    journal = family.Journal(root)
+    with journal.operation("prepare") as outputs:
+        family.write(root, "fixtures-manifest.json", {"cases": []})
+        journal.seal(outputs, root / "fixtures-manifest.json")
+    job = family.episode_schedule("exploration")[0]
+    folder = root / "episodes" / job["episode"]
+    family.claim(folder / "intent.json", job)
+    with _reservation_deadline(time.monotonic() + 10):
+        collected = collect_episodes(
+            CoverageEnv(),
+            folder / "dataset",
+            max_actions=1,
+            selector=select,
+            executor=advancing_executor([0.8]),
+        )
+    family.write(
+        folder,
+        "result.json",
+        {
+            "episode": job["episode"],
+            "actions": [],
+            "failed": True,
+            "score": 0,
+            "dataset_manifest_sha256": file_sha256(folder / "dataset/manifest.json"),
+            "collection": collected,
+        },
+    )
+    family.write(folder, "cleanup.json", {"passed": True})
+    family.write(root, "scene-cleanup.json", {"passed": True})
+    family.write(root, "gpu-lease.json", {"active": False})
+    journal.document["status"] = "incomplete"
+    journal.document["stages"].append(
+        {"stage": "exploration", "status": "failed_or_uncertain", "outputs": {}}
+    )
+    journal.save()
+    monkeypatch.setattr(family, "fixtures", lambda _: ([], {}))
+    return root
+
+
+def test_recovery_requires_proof_of_no_restore_no_actions_and_charges_prior_time(
+    tmp_path, monkeypatch
+):
+    source = recovery_source(tmp_path, monkeypatch)
+    proof = family.validate_preaction_recovery(source)
+    assert proof["prior_action_count"] == 0 and proof["fixture_preparations_carried"] == 12
+    child = family.Journal(tmp_path / "child", prior_seconds=proof["prior_charged_seconds"])
+    assert child.document["charged_seconds"] >= proof["prior_charged_seconds"]
+    folder = source / "episodes" / proof["consumed_episode"]
+    family.write(folder, "restoration.json", {"passed": True})
+    with pytest.raises(ValueError, match="native action/restoration"):
+        family.validate_preaction_recovery(source)
+    (folder / "restoration.json").unlink()
+    family.claim(
+        source / "action-intents/0000.json", {"episode": proof["consumed_episode"], "step": 0}
+    )
+    with pytest.raises(ValueError, match="zero-action"):
+        family.validate_preaction_recovery(source)
+
+
+def test_prepared_failure_can_be_transferred_only_once(tmp_path, monkeypatch):
+    source = recovery_source(tmp_path, monkeypatch)
+    proof = family.validate_preaction_recovery(source)
+    target = tmp_path / "child"
+    family.claim(source / "preaction-transfer-intent.json", {"target": str(target.resolve())})
+    with pytest.raises(ValueError, match="already transferred"):
+        family.validate_preaction_recovery(source)
+    with pytest.raises(ValueError, match="already transferred"):
+        family.validate_preaction_recovery(source, transfer_target=tmp_path / "other")
+    assert family.validate_preaction_recovery(source, transfer_target=target) == proof
+
+
+def test_carried_failed_initialization_consumes_one_episode_without_retry(tmp_path, monkeypatch):
+    import cloth_fling.learning as learning
+
+    journal = prepared(tmp_path)
+    jobs = family.episode_schedule("exploration")
+    cases = family.fixture_cases()
+    journal.carried_initialization = {
+        **result(failed=True),
+        "actions": [],
+        "episode": jobs[0]["episode"],
+    }
+    first = journal.root / "episodes" / jobs[0]["episode"]
+    family.write(first, "dataset/manifest.json", {})
+    monkeypatch.setattr(family, "fixtures", lambda _: (cases, {c["id"]: None for c in cases}))
+    monkeypatch.setattr(learning, "predictor", lambda p: pytest.fail("unexpected model"))
+    executed = []
+
+    def episode(env, journal, case, state, name, **kwargs):
+        executed.append(name)
+        family.write(journal.root / "episodes" / name, "dataset/manifest.json", {})
+        return result()
+
+    monkeypatch.setattr(pilot, "episode", episode)
+    with journal.operation("exploration") as outputs:
+        family.run_episodes(None, journal, "exploration", outputs)
+    assert executed == [j["episode"] for j in jobs[1:]]
+    assert len(journal.document["episodes"]) == 24
+    assert journal.document["episodes"][0]["carried_failed_initialization"]

@@ -2,8 +2,9 @@
 
 import argparse
 import json
+import shutil
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -105,10 +106,10 @@ def episode_schedule(stage, selected="initial"):
 
 
 class Journal:
-    def __init__(self, root):
+    def __init__(self, root, *, prior_seconds=0.0):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=False)
-        self.started = time.monotonic()
+        self.started = time.monotonic() - prior_seconds
         self.stage = "prepare"
         self.document = {
             "status": "running_never_resume",
@@ -145,6 +146,8 @@ class Journal:
 
     def claim_action(self, episode, step):
         self.check(reserve=self.reserve + 180)
+        if episode == getattr(self, "carried_initialization", {}).get("episode"):
+            raise RuntimeError("failed initialization slot already consumed; retry forbidden")
         scheduled = {x["episode"] for x in episode_schedule(self.stage)}
         # The selected checkpoint may be refreshed during test.
         if self.stage == "test":
@@ -200,7 +203,14 @@ class Journal:
         self.save()
         print(f"stage {stage}: {len(intents)}/216 actions claimed", flush=True)
         try:
-            with _reservation_deadline(time.monotonic() + self.remaining() - self.reserve):
+            # collect_episodes owns ITIMER_REAL during reset, selection and execution.
+            # Only non-collection stages may hold an enclosing watchdog.
+            watchdog = (
+                _reservation_deadline(time.monotonic() + self.remaining() - self.reserve)
+                if stage in ("prepare", "initial", "refreshed")
+                else nullcontext()
+            )
+            with watchdog:
                 yield entry["outputs"]
                 self.check()
             entry["status"] = "complete"
@@ -264,21 +274,47 @@ def choose_checkpoint(results):
 def run_episodes(env, journal, stage, outputs):
     from cloth_fling.learning import predictor
 
-    records, states = fixtures(journal.root)
-    selected = read(journal.root, "selection.json")["checkpoint"] if stage == "test" else "initial"
-    if (
-        stage == "test"
-        and file_sha256(journal.root / "checkpoints" / f"{selected}.pt")
-        != read(journal.root, "selection.json")["weights_sha256"]
-    ):
-        raise ValueError("selected checkpoint changed")
-    jobs = episode_schedule(stage, selected)
-    names = {"initial" if j["policy"] == "mixed" else j["policy"] for j in jobs} - {"uniform"}
-    predictions = {n: predictor(journal.root / "checkpoints" / f"{n}.pt") for n in names}
-    cases = {c["id"]: c for c in records}
+    with _reservation_deadline(time.monotonic() + journal.remaining() - journal.reserve):
+        records, states = fixtures(journal.root)
+        selected = (
+            read(journal.root, "selection.json")["checkpoint"] if stage == "test" else "initial"
+        )
+        if (
+            stage == "test"
+            and file_sha256(journal.root / "checkpoints" / f"{selected}.pt")
+            != read(journal.root, "selection.json")["weights_sha256"]
+        ):
+            raise ValueError("selected checkpoint changed")
+        jobs = episode_schedule(stage, selected)
+        names = {"initial" if j["policy"] == "mixed" else j["policy"] for j in jobs} - {"uniform"}
+        predictions = {n: predictor(journal.root / "checkpoints" / f"{n}.pt") for n in names}
+        cases = {c["id"]: c for c in records}
     results = []
     for job in jobs:
         journal.check()
+        carried = getattr(journal, "carried_initialization", None)
+        if carried and job["episode"] == carried["episode"]:
+            result = dict(
+                carried,
+                policy=job["policy"],
+                repeat=job["repeat"],
+                success=False,
+                carried_failed_initialization=True,
+            )
+            folder = journal.root / "episodes" / job["episode"]
+            write(folder, "result.json", result)
+            journal.document["episodes"].append(
+                {
+                    **job,
+                    "result_sha256": file_sha256(folder / "result.json"),
+                    "carried_failed_initialization": True,
+                }
+            )
+            journal.save()
+            journal.seal(outputs, folder / "result.json")
+            journal.seal(outputs, folder / "dataset" / "manifest.json")
+            results.append(result)
+            continue
         name = job["policy"]
         result = pilot.episode(
             env,
@@ -420,7 +456,14 @@ def report(root, *, verify=True):
         if not receipt or not final.exists() or file_sha256(final) != receipt["result_sha256"]:
             errors.append(f"uncertain episode receipt: {folder.name}")
         rows = []
+        reset_errors = []
         if (dataset / "manifest.json").exists():
+            manifest = read(dataset, "manifest.json")
+            for episode in manifest.get("episodes", []):
+                if episode.get("reset_evidence"):
+                    support = read_support(dataset, episode["reset_evidence"]["path"])
+                    if support.get("reset_error"):
+                        reset_errors.append(support["reset_error"])
             if verify and not verify_dataset(dataset)["valid"]:
                 errors.append(f"dataset verification: {folder.name}")
             rows = read_transitions(dataset).to_pylist()
@@ -454,7 +497,11 @@ def report(root, *, verify=True):
                 "failure_aware_terminal_coverage": result["score"] if result else 0,
                 "coverage": [r.get("coverage_after") for r in rows],
                 "reasons": [r.get("reason") for r in rows],
+                "reset_errors": reset_errors,
                 "actions": len(rows),
+                "carried_failed_initialization": bool(
+                    result and result.get("carried_failed_initialization")
+                ),
             }
         )
     claimed = [(a["episode"], a["step"]) for a in intents]
@@ -514,10 +561,107 @@ def report(root, *, verify=True):
     return result
 
 
-def run(root, *, backend_factory=None):
-    journal = Journal(root)  # Existing/uncertain roots fail before lease/backend construction.
+def validate_preaction_recovery(source, *, transfer_target=None):
+    """Only a proved pre-restore timer collision can carry forward without physical retry."""
+    source = Path(source)
+    transfer = source / "preaction-transfer-intent.json"
+    if transfer.exists() and (
+        transfer_target is None
+        or read(source, transfer.name)["target"] != str(Path(transfer_target).resolve())
+    ):
+        raise ValueError("prepared run already transferred; retry forbidden")
+    ledger = read(source, "ledger.json")
+    if (
+        read(source, "protocol.json") != PROTOCOL
+        or ledger["status"] != "incomplete"
+        or ledger["actions"]
+        or ledger["episodes"]
+        or list((source / "action-intents").glob("*.json"))
+        or [s["stage"] for s in ledger["stages"]] != ["prepare", "exploration"]
+        or ledger["stages"][0]["status"] != "complete"
+        or ledger["stages"][1]["status"] != "failed_or_uncertain"
+    ):
+        raise ValueError("recovery requires a terminal zero-action preparation-only run")
+    expected = episode_schedule("exploration")[0]["episode"]
+    directories = list((source / "episodes").iterdir())
+    if len(directories) != 1 or directories[0].name != expected:
+        raise ValueError("recovery may consume only the first failed initialization")
+    folder = directories[0]
+    result = read(folder, "result.json")
+    if (
+        result["actions"]
+        or not result["failed"]
+        or (folder / "restoration.json").exists()
+        or list(folder.glob("action-*"))
+        or not read(folder, "cleanup.json")["passed"]
+        or not read(source, "scene-cleanup.json")["passed"]
+        or read(source, "gpu-lease.json")["active"]
+    ):
+        raise ValueError("native action/restoration or uncertified cleanup forbids recovery")
+    dataset = folder / "dataset"
+    manifest = read(dataset, "manifest.json")
+    if (
+        not verify_dataset(dataset)["valid"]
+        or read_transitions(dataset).num_rows
+        or len(manifest["episodes"]) != 1
+        or file_sha256(dataset / "manifest.json") != result["dataset_manifest_sha256"]
+    ):
+        raise ValueError("recovery dataset identity or empty-action proof failed")
+    evidence = read_support(dataset, manifest["episodes"][0]["reset_evidence"]["path"])
+    if (
+        evidence.get("reset_error")
+        != "RuntimeError: collection requires an unused process real-time timer"
+    ):
+        raise ValueError("only the identified pre-restoration timer conflict is recoverable")
+    fixtures(source)
+    for name, digest in ledger["stages"][0]["outputs"].items():
+        if file_sha256(relative_path(source, name)) != digest:
+            raise ValueError("prepared source identity changed")
+    charged = ledger["charged_seconds"]
+    if not 0 <= charged < PROTOCOL["wall_seconds"] - PROTOCOL["collection_reserve_seconds"]:
+        raise ValueError("no authorized collection budget remains")
+    return {
+        "source": str(source.resolve()),
+        "ledger_sha256": file_sha256(source / "ledger.json"),
+        "manifest_sha256": file_sha256(source / "fixtures-manifest.json"),
+        "prior_charged_seconds": charged,
+        "consumed_episode": expected,
+        "prior_action_count": 0,
+        "fixture_preparations_carried": 12,
+        "source_unchanged_and_terminal": True,
+    }
+
+
+def import_prepared(journal, source, recovery):
+    # No preparation simulation, rerolls or repair of old receipts. Copy certified bytes.
+    if validate_preaction_recovery(source, transfer_target=journal.root) != recovery:
+        raise ValueError("pre-action recovery source changed")
+    shutil.copytree(source / "fixtures", journal.root / "fixtures")
+    shutil.copy2(source / "fixtures-manifest.json", journal.root / "fixtures-manifest.json")
+    name = recovery["consumed_episode"]
+    shutil.copytree(source / "episodes" / name, journal.root / "episodes" / name)
+    journal.carried_initialization = read(source / "episodes" / name, "result.json")
+    write(journal.root, "preaction-recovery.json", recovery)
+    journal.document["preaction_recovery"] = recovery
+    journal.save()
+
+
+def run(root, *, backend_factory=None, prepared_from=None):
+    recovery = validate_preaction_recovery(prepared_from) if prepared_from is not None else None
+    journal = Journal(
+        root, prior_seconds=recovery["prior_charged_seconds"] if recovery else 0.0
+    )  # Existing/uncertain roots fail before lease/backend construction.
     env = None
     try:
+        if recovery:
+            claim(
+                Path(prepared_from) / "preaction-transfer-intent.json",
+                {
+                    "target": str(journal.root.resolve()),
+                    "never_retry": True,
+                    "source_ledger_sha256": recovery["ledger_sha256"],
+                },
+            )
         with reference_lease(journal.root):
             try:
                 with journal.operation("prepare") as outputs:
@@ -534,7 +678,10 @@ def run(root, *, backend_factory=None):
                         env = backend_factory(
                             scene_config_from_dict(frozen_laydown_spec()["scene"])
                         )
-                    pilot.prepare(env, journal, cases=fixture_cases())
+                    if recovery:
+                        import_prepared(journal, Path(prepared_from), recovery)
+                    else:
+                        pilot.prepare(env, journal, cases=fixture_cases())
                     for name in (
                         "protocol.json",
                         "implementation.json",
@@ -542,6 +689,8 @@ def run(root, *, backend_factory=None):
                         "fixtures-manifest.json",
                     ):
                         journal.seal(outputs, journal.root / name)
+                    if recovery:
+                        journal.seal(outputs, journal.root / "preaction-recovery.json")
                 for stage in STAGES[1:]:
                     with journal.operation(stage) as outputs:
                         if stage in ("initial", "refreshed"):
@@ -590,8 +739,19 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("run", "report"))
     parser.add_argument("--output", type=Path, default=Path(DEFAULT_OUTPUT))
+    parser.add_argument(
+        "--prepared-from",
+        type=Path,
+        help="Carry a verified zero-action timer failure into a fresh root; consume its episode slot",
+    )
     args = parser.parse_args(argv)
-    result = run(args.output) if args.command == "run" else report(args.output)
+    if args.command == "report" and args.prepared_from is not None:
+        parser.error("--prepared-from applies only to run")
+    result = (
+        run(args.output, prepared_from=args.prepared_from)
+        if args.command == "run"
+        else report(args.output)
+    )
     if args.command == "report":
         write(args.output, "family-report.json", result)
     print(json.dumps(result, indent=2))

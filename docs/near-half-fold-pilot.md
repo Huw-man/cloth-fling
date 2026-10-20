@@ -69,3 +69,14 @@ Deliver verified datasets, the selected checkpoint when available, `family-repor
 and saved-geometry overhead/oblique/combined replays of representative outcomes and
 available failures. Give project-relative paths only; never open replay panes.
 Budget exhaustion or a campaign stop is incomplete, with no replacement attempts.
+
+### Proven pre-action timer-failure correction
+
+`run --prepared-from SOURCE --output NEW_ROOT` supports only the identified runner
+timer collision before any restore/action. It requires the exact protocol, twelve
+verified prepared fixtures, zero action intents/rows, one first-slot failed
+initialization, and passed cleanup. It copies prepared bytes without simulation,
+consumes that failed episode slot, and carries prior charged seconds into the same
+six-hour budget. The old root stays terminal. An exclusive source transfer intent
+permits only one fresh target; failed or uncertain transfers cannot be retried.
+No other failure or physical action can use this correction path.
