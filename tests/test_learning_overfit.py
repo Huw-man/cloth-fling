@@ -214,6 +214,26 @@ def test_checks_and_unrelated_data_cannot_enter_fit(tmp_path):
         overfit.fit_checkpoint(None, [folder], tmp_path / "model.pt", None)
 
 
+def test_collector_receipt_before_campaign_annotation_is_uncertain(tmp_path):
+    journal = overfit.Journal(tmp_path / "run")
+    folder = journal.root / "episodes" / "interrupted"
+    overfit.claim(folder / "intent.json", {})
+    overfit.write(
+        folder,
+        "result.json",
+        {
+            "episode": "interrupted",
+            "failed": True,
+            "fatal": "interrupted",
+            "actions": [],
+        },
+    )
+    result = overfit.report(journal.root, verify=False)
+    assert not result["qualified"]
+    assert "episode result/ledger mismatch" in result["integrity_errors"]
+    assert result["episodes"][0]["kind"] == "uncertain"
+
+
 def test_restore_exact_checks_velocity_not_just_positions():
     from test_reference_pilot import Env
 

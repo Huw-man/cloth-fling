@@ -317,9 +317,15 @@ def develop(
 
 
 def episode_results(root):
-    return [
-        json.loads(p.read_text()) for p in sorted((Path(root) / "episodes").glob("*/result.json"))
-    ]
+    results = []
+    for path in sorted((Path(root) / "episodes").glob("*/result.json")):
+        result = json.loads(path.read_text())
+        # The shared collector writes its receipt before the campaign annotates it.
+        # A crash in that interval is preserved as an uncertain, non-qualifying episode.
+        result.setdefault("kind", "uncertain")
+        result.setdefault("success", False)
+        results.append(result)
+    return results
 
 
 def render_evidence(journal):
