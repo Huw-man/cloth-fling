@@ -327,3 +327,19 @@ start training/collection. Specify the small training-pilot protocol and bounded
 budget before execution. User approval of this motion is separate from held-out,
 learned-policy, material or physical pinch-grasp qualification; preserve the known
 limitations and all historical failures.
+
+## Bounded image-grasp learning pilot (new authorization)
+
+The user authorized implementation and local execution of `docs/image-learning-pilot.md`:
+21 finite-radius folded schema-2 fixtures, splits frozen by fold family, the unchanged
+v4 continuation/physics, RGB-only immediate-value grasp learning, one random round,
+one learner-state refresh and a three-action paired held-out comparison. The ceiling
+is eight hours execution and 432 action attempts, including all failures; reserve two
+hours from collection for fitting/evaluation/reporting. No fixture substitutions,
+rerolls, uncertain retries, motion/physics tuning, cloud, hardware or publication.
+Use a new `runs/image-learning-pilot-v1/` root. Historical campaigns remain terminal.
+Source/fixture/dataset/checkpoint identities and stage/action intent are durable;
+incomplete preparation or any ownership/restoration/contact/rendering/cleanup/artifact
+regression stops dependent execution. Stable placement quality remains observational.
+Training is authorized only within this fixed pilot. Do not extend the budget or
+infer broad generalization, material fidelity or physical pinch-grasp qualification.
