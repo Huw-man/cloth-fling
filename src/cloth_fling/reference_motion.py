@@ -152,7 +152,7 @@ class _Motion:
         for index in range(1, count + 1):
             self.tick(name, start + minimum_jerk(index / count) * (goal - start))
 
-    def tauten_cloth(self):
+    def tauten_cloth(self, allowance=20.0):
         self.phase("tauten")
         rest = self.env.rest_positions
         # Face centers define material samples; grasp vertices remain independent hard pins.
@@ -184,7 +184,7 @@ class _Motion:
             return stable >= 5
 
         span = initial
-        while self.env.simulated_time - begin < 20 - self.tick_dt / 2:
+        while self.env.simulated_time - begin < allowance - self.tick_dt / 2:
             p, _, rms = self.tick("tauten", self.target)
             if feedback(p, rms):
                 reason = "tautness_proxy"
@@ -194,7 +194,7 @@ class _Motion:
                 break
             delta = min(0.02, cap - span)
             duration = np.ceil(max(0.4, 1.875 * (delta / 2) / 0.02) / self.tick_dt) * self.tick_dt
-            if self.env.simulated_time - begin + duration > 20 + 1e-8:
+            if self.env.simulated_time - begin + duration > allowance + 1e-8:
                 break
             old = self.target.copy()
             span += delta
@@ -205,7 +205,7 @@ class _Motion:
                 p, _, rms = self.tick("tauten", old + minimum_jerk(i / count) * (goal - old))
                 feedback(p, rms)
             for _ in range(
-                min(50, int((20 - (self.env.simulated_time - begin) + 1e-8) / self.tick_dt))
+                min(50, int((allowance - (self.env.simulated_time - begin) + 1e-8) / self.tick_dt))
             ):
                 p, _, rms = self.tick("tauten", self.target)
                 if feedback(p, rms):

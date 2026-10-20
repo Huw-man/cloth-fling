@@ -1,0 +1,232 @@
+{
+  "version": "reference_leading_v2",
+  "limits": {
+    "development": 20,
+    "confirmation": 3,
+    "simulator_wall_seconds": 7200,
+    "action_simulated_seconds": 35,
+    "action_wall_seconds": 180
+  },
+  "candidates": [
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.45,
+      "descent_seconds": 2,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.45,
+      "descent_seconds": 3,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.45,
+      "descent_seconds": 4,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.45,
+      "descent_seconds": 1.5,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.45,
+      "descent_seconds": 1,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.55,
+      "descent_seconds": 2,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.55,
+      "descent_seconds": 3,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.55,
+      "descent_seconds": 4,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.55,
+      "descent_seconds": 1.5,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.55,
+      "descent_seconds": 1,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.35,
+      "descent_seconds": 2,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.35,
+      "descent_seconds": 3,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.35,
+      "descent_seconds": 4,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.35,
+      "descent_seconds": 1.5,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.35,
+      "descent_seconds": 1,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.65,
+      "descent_seconds": 2,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.65,
+      "descent_seconds": 3,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.65,
+      "descent_seconds": 4,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.65,
+      "descent_seconds": 1.5,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    },
+    {
+      "version": "reference_leading_v2",
+      "transfer_x_m": 0.65,
+      "descent_seconds": 1,
+      "transfer_seconds": 1.5,
+      "drag_seconds": 0.8,
+      "endpoint_hold_seconds": 1.0,
+      "join_speed_m_s": 0.1,
+      "max_speed_m_s": 0.8,
+      "max_acceleration_m_s2": 2.0
+    }
+  ]
+}

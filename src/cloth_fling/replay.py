@@ -107,7 +107,38 @@ def load_replay(source, *, episode_id=None):
     """Offline loader. Retain invalid attempts and group dataset rows by episode/step."""
     source = Path(source).resolve()
     actions = []
-    if source.is_dir() and (source / "reference-report.json").is_file():
+    if source.is_dir() and (source / "tune-report.json").is_file():
+        from cloth_fling.reference_tune import read_hashed_bundle
+
+        if episode_id is not None:
+            raise ValueError("episode_id selection applies to datasets only")
+        document = json.loads((source / "tune-report.json").read_text())
+        state = read_hashed_bundle(source, "fixture.json")
+        for attempt in document["attempts"]:
+            ref = attempt["outcome"]
+            if file_sha256(relative_path(source, ref["path"])) != ref["sha256"]:
+                raise ValueError("tuning outcome hash mismatch")
+            run = read_hashed_bundle(source, ref["path"])
+            actions.append(
+                validate_action(
+                    ReplayAction(
+                        label=f"{attempt['category']} attempt {attempt['attempt']} candidate {attempt['candidate']}",
+                        state=state,
+                        traces=run["evidence"]["phase_traces"],
+                        duration=run["simulated_seconds"],
+                        execution_valid=run["execution_valid"],
+                        reason=run["reason"],
+                        source=run,
+                        original_rgb={},
+                        table_height_m=0.30,
+                    )
+                )
+            )
+        origin = {
+            "format": "reference_tuning",
+            "source_tune_report_sha256": file_sha256(source / "tune-report.json"),
+        }
+    elif source.is_dir() and (source / "reference-report.json").is_file():
         from cloth_fling.data.storage import read_bundle
 
         if episode_id is not None:
@@ -127,13 +158,25 @@ def load_replay(source, *, episode_id=None):
         run = checked_bundle(document["single_action"])
         state = checked_bundle(document["initial_state"])
         evidence = run["evidence"]
-        actions.append(validate_action(ReplayAction(
-            label="reference controlled laydown", state=state,
-            traces=evidence.get("phase_traces", []), duration=run["simulated_seconds"],
-            execution_valid=run["execution_valid"], reason=run["reason"], source=run,
-            original_rgb={}, table_height_m=0.30)))
-        origin = {"format": "reference_diagnostic",
-                  "source_reference_report_sha256": file_sha256(source / "reference-report.json")}
+        actions.append(
+            validate_action(
+                ReplayAction(
+                    label="reference controlled laydown",
+                    state=state,
+                    traces=evidence.get("phase_traces", []),
+                    duration=run["simulated_seconds"],
+                    execution_valid=run["execution_valid"],
+                    reason=run["reason"],
+                    source=run,
+                    original_rgb={},
+                    table_height_m=0.30,
+                )
+            )
+        )
+        origin = {
+            "format": "reference_diagnostic",
+            "source_reference_report_sha256": file_sha256(source / "reference-report.json"),
+        }
     elif source.is_dir() and (source / "manifest.json").is_file():
         manifest = json.loads((source / "manifest.json").read_text())
         episodes = {e["episode_id"]: e for e in manifest["episodes"]}
@@ -353,6 +396,11 @@ def render_replay(
         kind="reconstructed_replay",
         writer_factory=writer_factory,
     ) as recorder:
+        if origin["format"] == "reference_tuning":
+            recorder.view_poses = {
+                "overhead": {"pos": (0.55, 0, 2.9), "lookat": (0.55, 0, 0.4), "up": (0, 1, 0)},
+                "oblique": {"pos": (1.9, -1.9, 1.7), "lookat": (0.50, 0, 0.5), "up": (0, 0, 1)},
+            }
         for index, action in enumerate(actions):
             template = json.loads(str(action.state["config_json"]))
             reference = template.get("profile") == "reference_laydown_v1"
@@ -419,6 +467,7 @@ def render_replay(
         original_observations=copied,
         truncated=truncated,
         max_frames=max_frames,
+        view_poses=getattr(recorder, "view_poses", None),
         action_outcomes=[
             {"action": a.label, "execution_valid": a.execution_valid, "reason": a.reason}
             for a in actions

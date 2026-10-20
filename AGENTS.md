@@ -124,3 +124,14 @@ tuning after inspecting qualification outcomes. All failed evidence is preserved
 The first motion reached the solver boundary during drag after successful full-cloth
 airborne hold; placement is unqualified and continuity was not evaluated. See
 `docs/reference-results.md`. Do not infer diverse-reset or learned-policy success.
+
+## Leading-edge development campaign (new authorization)
+
+The user superseded the reference profile's no-motion-tuning restriction only for
+`reference_leading_v2`: at most 20 deterministic grid attempts, followed by three
+frozen confirmations, within two hours simulator wall. Restore the exact archived
+reference fixture and favorable native vertices before each attempt. Preserve all
+physics, appearance, mesh, grasp and table settings. Independent native cleanup and
+durable intent records are mandatory; uncertain/failed attempts cannot be resumed.
+See `docs/reference-leading.md`. Previous reference and milestone 3 campaigns remain
+terminal. No learning, varied-grasp evaluation, cloud, hardware or publication.

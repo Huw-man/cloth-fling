@@ -96,7 +96,9 @@ def preserved_camera(camera):
             camera._debug = debug
 
 
-def render_debug_views(env, *, phase, selected_targets_m=None, attachment_ids=None):
+def render_debug_views(
+    env, *, phase, selected_targets_m=None, attachment_ids=None, view_poses=None
+):
     """Capture overhead + oblique without observe(), stepping, or cache mutation.
 
     Run synchronously on the scene owner thread. ``attachment_ids`` overrides are
@@ -119,10 +121,12 @@ def render_debug_views(env, *, phase, selected_targets_m=None, attachment_ids=No
     options = dict(rgb=True, depth=False, antialiasing=False, force_render=True)
     with preserved_camera(env.camera):
         with debug_markers(env.scene, points):
+            if view_poses is not None:
+                env.camera.set_pose(**view_poses["overhead"])
             # First offscreen call may only allocate native dynamic vertex buffers.
             env.camera.render(**options)
             overhead = np.asarray(env.camera.render(**options)[0], dtype=np.uint8).copy()
-            env.camera.set_pose(**OBLIQUE_POSE)
+            env.camera.set_pose(**(OBLIQUE_POSE if view_poses is None else view_poses["oblique"]))
             oblique = np.asarray(env.camera.render(**options)[0], dtype=np.uint8).copy()
     for frame in (overhead, oblique):
         if frame.ndim != 3 or frame.shape[2] != 3:
@@ -313,7 +317,11 @@ class VideoRecorder:
             selected = getattr(self, "selected_targets_m", None)
         ids = trace.get("attachment_ids", ()) if replay else None
         views = render_debug_views(
-            env, phase=phase, selected_targets_m=selected, attachment_ids=ids
+            env,
+            phase=phase,
+            selected_targets_m=selected,
+            attachment_ids=ids,
+            **({"view_poses": self.view_poses} if hasattr(self, "view_poses") else {}),
         )
         positions = env.get_positions()
         clearance = float(np.min(positions[:, 2]) - self.table_height_m - self.particle_radius_m)

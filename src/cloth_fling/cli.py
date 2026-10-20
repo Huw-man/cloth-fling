@@ -130,7 +130,9 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--output", type=Path, required=True)
     diagnose.add_argument("--seed", type=int, default=0)
     diagnose.add_argument("--primitive-config", help="Separate motion/settling JSON overrides")
-    diagnose.add_argument("--reset-kind", choices=("flat", "drop", "fold", "authored"), default="fold")
+    diagnose.add_argument(
+        "--reset-kind", choices=("flat", "drop", "fold", "authored"), default="fold"
+    )
     diagnose.add_argument("--reset-dir", type=Path, help="Compare from a saved fixture")
     diagnose.add_argument("--record-video", action="store_true", help="Native debug captures")
     diagnose.add_argument(
@@ -155,7 +157,9 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument(
         "--reset-dir", type=Path, help="Restore a saved reset at episode boundaries"
     )
-    collect.add_argument("--reset-kind", choices=("flat", "drop", "fold", "authored"), default="fold")
+    collect.add_argument(
+        "--reset-kind", choices=("flat", "drop", "fold", "authored"), default="fold"
+    )
     collect.add_argument(
         "--policy", choices=("uniform_valid", "geometry_guided"), default="uniform_valid"
     )
@@ -167,9 +171,14 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--settled-coverage-threshold", type=float)
 
     reference = sub.add_parser("reference", help="Bounded reference towel qualification")
-    reference.add_argument("stage", choices=("qualify",))
+    reference.add_argument("stage", choices=("qualify", "tune"))
+    reference.add_argument(
+        "--fixture", type=Path, help="Archived failed reference campaign (tune only)"
+    )
     reference.add_argument("--output", type=Path, required=True)
-    reference.add_argument("--previous", type=Path, help="Carry all charges from a terminal setup attempt")
+    reference.add_argument(
+        "--previous", type=Path, help="Carry all charges from a terminal setup attempt"
+    )
     reference.add_argument("--backend", choices=("gpu", "cpu"), default="gpu")
 
     benchmark = sub.add_parser("benchmark", help="Bounded milestone-3 benchmark")
@@ -223,7 +232,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "reference":
             from cloth_fling.reference_run import run_reference_qualification
 
-            report = run_reference_qualification(args.output, backend=args.backend, previous=args.previous)
+            if args.stage == "tune":
+                from cloth_fling.reference_tune import run_reference_tuning
+
+                if args.fixture is None or args.previous is not None:
+                    raise ValueError(
+                        "reference tune requires --fixture and does not accept --previous"
+                    )
+                report = run_reference_tuning(
+                    args.output, fixture_dir=args.fixture, backend=args.backend
+                )
+            else:
+                if args.fixture is not None:
+                    raise ValueError("--fixture applies to reference tune only")
+                report = run_reference_qualification(
+                    args.output, backend=args.backend, previous=args.previous
+                )
             print(json.dumps(report, indent=2, allow_nan=False))
             return 0 if report["stage_passed"] else 1
         if args.command == "benchmark":
@@ -300,7 +324,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.probe:
                 env = _backend(args)
                 try:
-                    obs = env.reset(kind="authored" if isinstance(env.config, ReferenceSceneConfig) else "flat")
+                    obs = env.reset(
+                        kind="authored" if isinstance(env.config, ReferenceSceneConfig) else "flat"
+                    )
                     report["simulation_probed"] = True
                     report["scene"] = {
                         "rgb_shape": list(obs.rgb.shape),
@@ -321,7 +347,8 @@ def main(argv: list[str] | None = None) -> int:
             if not 0 < args.max_wall_seconds <= 86400:
                 raise ValueError("max-wall-seconds must be in (0, 86400]")
         if args.command in ("collect", "diagnose") and (
-            args.profile == "reference" or isinstance(load_config(args.config), ReferenceSceneConfig)
+            args.profile == "reference"
+            or isinstance(load_config(args.config), ReferenceSceneConfig)
         ):
             raise ValueError("use 'reference qualify' for the bounded reference campaign")
         primitive_config = None
