@@ -201,3 +201,79 @@ def test_unsettled_episode_stops_without_replacement(tmp_path, monkeypatch):
     assert result["failed"] and result["score"] == 0
     assert len(result["actions"]) == len(journal.document["actions"]) == 1
     assert env.restore_calls == 1
+
+
+def test_crash_after_intent_before_ledger_save_is_accounted_and_not_resumed(tmp_path):
+    root, journal = ready_journal(tmp_path)
+    pilot.claim(root / "action-intents" / "0000.json", {"status": "claimed_never_retry"})
+    with pytest.raises(RuntimeError, match="intent/ledger gap"):
+        pilot.Journal(root)
+    result = pilot.report(root)
+    assert result["claimed_actions"] == 1
+    assert result["status"] == "incomplete_artifact_regression"
+
+
+def test_stage_has_outer_wall_deadline_before_backend_work(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    root = tmp_path / "pilot"
+    pilot.initialize(root)
+    deadlines = []
+
+    @contextmanager
+    def deadline(value):
+        deadlines.append(value)
+        if len(deadlines) == 1:
+            raise TimeoutError("outer budget")
+        yield
+
+    monkeypatch.setattr(pilot, "_reservation_deadline", deadline)
+    monkeypatch.setattr(
+        pilot, "reference_lease", lambda root: __import__("contextlib").nullcontext()
+    )
+    with pytest.raises(TimeoutError, match="outer budget"):
+        pilot.execute_stage(
+            root, "prepare", backend_factory=lambda config: pytest.fail("opened scene")
+        )
+    assert pilot.read(root, "ledger.json")["status"] == "incomplete"
+
+
+def test_failed_report_does_not_retry_expensive_verification(tmp_path, monkeypatch):
+    root, journal = ready_journal(tmp_path)
+    directory = root / "episodes" / "test" / "dataset"
+    directory.mkdir(parents=True)
+    pilot.write(directory, "manifest.json", {})
+    pilot.write(
+        directory.parent,
+        "result.json",
+        {
+            "episode": "test",
+            "failed": True,
+            "actions": [],
+            "score": 0,
+            "dataset_manifest_sha256": pilot.file_sha256(directory / "manifest.json"),
+            "collection": {"episode_reports": [{"initial_coverage": 0.5}]},
+        },
+    )
+    monkeypatch.setattr(pilot, "verify_dataset", lambda _: pytest.fail("retried verification"))
+    result = pilot.report(root, verify=False)
+    assert not result["pipeline_complete"] and not result["verification_completed"]
+    assert not result["behavior_positive"]
+    with pytest.raises(pytest.fail.Exception, match="retried verification"):
+        pilot.report(root)
+
+
+def test_refused_terminal_command_preserves_successful_report(tmp_path, monkeypatch):
+    root, journal = ready_journal(tmp_path)
+    journal.document["status"] = "complete"
+    journal.save()
+    pilot.write(root, "pilot-report.json", {"status": "complete", "pipeline_complete": True})
+    original = (root / "pilot-report.json").read_bytes()
+
+    def reject(*args, **kwargs):
+        raise RuntimeError("terminal pilot cannot execute")
+
+    monkeypatch.setattr(pilot, "execute_stage", reject)
+    assert pilot.main(["collect", "--stage", "refresh", "--output", str(root)]) == 1
+    assert (root / "pilot-report.json").read_bytes() == original
+    assert not (root / "command-failure.json").exists()

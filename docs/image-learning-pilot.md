@@ -87,6 +87,12 @@ fsynced intent before native writes. Failed, active or uncertain stages cannot
 resume. Offline `report` can inspect them without simulation or Torch, and never
 changes their execution ledger or makes them eligible for replay.
 
+The implemented stage watchdog also bounds fixture/dataset verification and fitting,
+not only controller stepping. Reporting reconciles the immutable intent files with
+the ledger, including a crash between those two durable writes. An interrupted
+report uses a short non-qualifying summary rather than retrying expensive checks
+after its deadline. These offline guards do not reopen a completed native run.
+
 The primary metric is paired final settled coverage after at most three actions.
 Episodes without a valid settled terminal state score zero for this metric; observed
 coverage and reasons are retained separately. Average orientations within a family,
