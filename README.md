@@ -48,6 +48,11 @@ grasp selection and material fidelity remain unqualified.
 The latest longer-drag check completed both 12 cm drags and settled 1.38 cm and
 3.20 cm from the workspace center. Drag-only coverage improved by .110200 and
 .043967; overall random-grasp coverage was .993333 → .573267 → .418417.
+The user approved this centered v4 demonstration as the next training-pilot motion
+baseline. Its [approval record](configs/end-to-end-pilot-baseline-v1.json) pins the
+unchanged controller configuration and reviewed native evidence/replay hashes.
+The next pilot will build image-based grasp selection around this fixed continuation;
+training has not started.
 
 ## Install and check Genesis 1.4.4
 

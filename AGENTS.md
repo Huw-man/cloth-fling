@@ -308,3 +308,22 @@ Peak local edge ratios 1.684783 and 2.063633 remain material limitations. The v3
 development plus v4 correction charged 192.471 wall seconds combined; no further
 episodes or tuning follow from remaining budget. Native ownership, release,
 cleanup, exact continuity, artifact/replay auditing and 527 CPU tests passed.
+
+## User-approved baseline for the next training pilot
+
+The user selected the centered v4 demonstration as the trajectory to save and
+build upon for the end-to-end training pilot. The authoritative selection record
+is `configs/end-to-end-pilot-baseline-v1.json`, referencing the unchanged frozen
+`reference_post_grasp_laydown_v4` specification and exact reviewed native evidence
+and replay hashes. See `docs/frozen-laydown.md`. Keep the 12 cm / two-second drag,
+measured hanging-geometry centering rule, phase timing, physics and native handoff
+fixed when building the next pilot. Save per-action measured coefficients rather
+than replacing the controller with one demonstration's literal Cartesian path.
+
+The intended next slice learns RGB-based grasp selection around this continuation,
+with privileged geometry confined to execution/feasibility/evaluation and no reset
+between valid actions. This baseline selection does not reopen completed runs or
+start training/collection. Specify the small training-pilot protocol and bounded
+budget before execution. User approval of this motion is separate from held-out,
+learned-policy, material or physical pinch-grasp qualification; preserve the known
+limitations and all historical failures.
