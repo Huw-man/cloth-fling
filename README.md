@@ -62,6 +62,15 @@ show .4764 held-out terminal coverage for the selected learner versus .3518 for
 random selection. Both remain below mean starting coverage .6226; reliable
 unfolding and material fidelity remain unqualified. The run is terminal.
 
+The [single-reset overfitting experiment](docs/single-reset-overfit.md) tests at most
+three continuous actions from one exact archived reset. Its primary milestone is
+now 80% settled, contained coverage. The [first run](docs/single-reset-overfit-results.md)
+stopped incomplete after 262 attempts on the existing deformation safeguard.
+Best dedicated greedy coverage was .7544; one uniform exploratory action reached
+.8375. No learned checkpoint qualified. `cloth-fling learning-overfit report`
+reads the archived run without resuming it; future runs default to versioned .80
+early stopping, with explicit .98 historical reproduction available.
+
 ## Install and check Genesis 1.4.4
 
 Version 0.2.0 pins **Genesis 1.4.4**, the latest stable release checked on 2026-10-19,
@@ -153,8 +162,9 @@ history, not a command to reproduce old physics in the new runtime.
 - Valid evolving-cloth actions have no intervening reset; invalid attempts and terminal
   observations are recorded, and valid negative coverage gains are retained.
 - Local datasets store Parquet rows, PNG RGB and NPZ/JSON supporting state. `runs/` is ignored.
-- There are no arms, IK, physical pinch qualification or trained models. Further primitive
-  campaigns, broad collection, training, hardware, cloud and publication remain out of scope.
+- There are no arms, IK or physical pinch qualification. Local trained checkpoints are
+  diagnostic; reliable unfolding remains unqualified. Additional campaigns, collection,
+  training, hardware, cloud and publication require new authorization.
 
 See [runtime](docs/runtime.md), [dataset format](docs/dataset.md),
 [primitive diagnostics](docs/primitives.md) and [viewer/replay](docs/viewer.md).

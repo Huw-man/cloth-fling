@@ -355,7 +355,7 @@ and `runs/image-learning-pilot-v1/`. No further training, collection, reruns or
 tuning are authorized by unused budget. Offline deadline/accounting fixes do not
 reopen this experiment or alter its preserved executed source identity.
 
-## Single-reset overfitting (new authorization)
+## Single-reset overfitting (terminal first campaign)
 
 The user authorized `docs/single-reset-overfit.md`: learn RGB grasps from scratch on
 the exact archived `fold-50-+00` reset with frozen v4 motion and physics. Reach >=.80
@@ -373,3 +373,15 @@ assess the first settled, contained .80 hit within each saved episode separately
 Future runs default to versioned .80 early stopping; explicit .98 reproduction
 remains supported. This amendment does not authorize a restart, more actions or
 more wall time. An exploratory .80 hit does not qualify the learned selector.
+
+The first campaign stopped incomplete after 262 attempts: 94 finalized episode
+receipts plus one failed episode with three retained dataset rows. Seven fits and
+seven greedy checks ran. Best greedy coverage was .754383 after three actions;
+one uniform exploratory action reached .837467. No learned .80 qualification or
+confirmation was achieved. The final action crossed the existing 3.0 deformation
+bound (terminal local edge ratio 3.072870). A reporting bug masked that failure as
+a state-chain error; archived pre-action and preceding terminal states actually
+match. Cleanup passed. Reporting fixes preserve evidence and original errors but
+do not reopen or rerun the campaign. See `docs/single-reset-overfit-results.md` and
+`runs/single-reset-overfit-v1/failure-analysis.json`. No further physical actions,
+training or campaign restart are authorized by the unused budget.
