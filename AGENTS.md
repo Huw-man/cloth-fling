@@ -224,3 +224,11 @@ action bounds. Preserve failed/uncertain actions without retry or reroll. Placem
 quality is observational; physical execution, ownership, cleanup and artifact
 regressions stop. No new fold recipes, broad collection, training, cloud, hardware
 or publication. Deliver project-relative replay paths without opening a viewer.
+
+The authorized episode is now terminal and complete for integration only. Both
+image-selected grasps entered the unchanged frozen motion with exact continuity
+and verified native ownership/release/cleanup, within 80.859 wall seconds including
+replay. Coverage fell .993333 → .522433 → .293817; the second action did not settle
+within five seconds. Peak edge ratios were 2.018889 and 2.184940. These remain
+negative placement/material evidence, not unfolding or policy qualification.
+Preserve `runs/image-grasp-laydown-pilot-20261019/`; do not rerun or extend it.
