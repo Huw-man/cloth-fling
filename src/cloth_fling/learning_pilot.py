@@ -403,8 +403,17 @@ class EpisodePolicy:
             self.fatal = f"rendering/action-batch regression: {exc}"
             raise
         try:
+            values = None
+
+            def measured_prediction(rgb):
+                nonlocal values
+                values = self.predict(rgb)
+                return values
+
             prediction = (
-                self.predict if self.predict is not None and rng.random() >= self.epsilon else None
+                measured_prediction
+                if self.predict is not None and rng.random() >= self.epsilon
+                else None
             )
             action = choose_action(batch, rng=rng, predictor=prediction)
             if action is not None:
@@ -412,6 +421,11 @@ class EpisodePolicy:
                     "encoding": action.encoding,
                     "valid_action_mask": batch.feasible,
                     "observation_id": observation.observation_id,
+                    "predicted_gain": (
+                        float(np.asarray(values)[tuple(action.encoding["map_index_tvu"])])
+                        if values is not None
+                        else None
+                    ),
                 }
             return action
         except Exception as exc:
@@ -475,7 +489,20 @@ class EpisodeExecutor:
             raise
 
 
-def episode(env, journal, case, fixture, name, *, predict=None, epsilon=1.0, seed=0):
+def episode(
+    env,
+    journal,
+    case,
+    fixture,
+    name,
+    *,
+    predict=None,
+    epsilon=1.0,
+    seed=0,
+    coverage_stop=0.95,
+    require_containment=False,
+    reserve_seconds=None,
+):
     root = journal.root / "episodes" / name
     claim(
         root / "intent.json",
@@ -509,6 +536,8 @@ def episode(env, journal, case, fixture, name, *, predict=None, epsilon=1.0, see
     env.restore = checked_restore
     try:
         reserve = COLLECTION_RESERVE_SECONDS if journal.stage in ("exploration", "refresh") else 0
+        if reserve_seconds is not None:
+            reserve = reserve_seconds
         report = collect_episodes(
             env,
             root / "dataset",
@@ -529,7 +558,8 @@ def episode(env, journal, case, fixture, name, *, predict=None, epsilon=1.0, see
                 "stage": journal.stage,
                 "fixture_manifest_sha256": file_sha256(journal.root / "fixtures-manifest.json"),
             },
-            settled_coverage_threshold=0.95,
+            settled_coverage_threshold=coverage_stop,
+            success_requires_containment=require_containment,
         )
     finally:
         env.restore = restore
@@ -537,99 +567,108 @@ def episode(env, journal, case, fixture, name, *, predict=None, epsilon=1.0, see
         write(root, "cleanup.json", cleanup)
     if not cleanup["passed"]:
         raise RuntimeError("episode native cleanup regression")
-    verification = verify_dataset(root / "dataset")
-    if not verification["valid"]:
-        raise RuntimeError("episode artifact verification regression")
-    rows = read_transitions(root / "dataset").to_pylist()
-    details = []
-    for i, row in enumerate(rows):
-        support = read_support(root / "dataset", row["evidence_path"])
-        if i:
-            for suffix in ("observation_id", "rgb_path", "support_path"):
-                if row[f"before_{suffix}"] != rows[i - 1][f"after_{suffix}"]:
-                    raise RuntimeError("episode observation chain regression")
-            state = read_support(root / "dataset", rows[i - 1]["final_state_path"])
-            handoff = support.get("evidence", {}).get("image_grasp_handoff", {})
-            if handoff.get("before_state_hash") != state["state_hash"]:
-                raise RuntimeError("episode native state chain regression")
-        diagnostics = support.get("diagnostics", {})
-        concise_diagnostics = {
-            k: diagnostics[k]
-            for k in (
-                "settled",
-                "max_edge_ratio",
-                "tracking_error_m",
-                "final_rms_speed_m_s",
-                "final_table_containment",
-                "airborne_hold_seconds",
-                "airborne_hold_min_clearance_m",
-                "release_tcp_speed_m_s",
-                "terminal_observation_valid",
-                "frozen_laydown_version",
-                "leading_window_min_fraction",
-                "execution_mode",
-            )
-            if k in diagnostics
-        }
-        state_path = row.get("final_state_path")
-        if row["execution_valid"] and not state_path:
-            raise RuntimeError("missing native terminal state artifact")
-        if state_path:
-            native = read_support(root / "dataset", state_path)
-            p = np.asarray(native["positions"])
-            v = np.asarray(native["velocities"])
-            if (
-                not np.isfinite(p).all()
-                or not np.isfinite(v).all()
-                or not np.asarray(native["free"]).all()
-            ):
-                raise RuntimeError("native terminal finiteness/ownership regression")
-            center = (p[:, :2].min(0) + p[:, :2].max(0)) / 2
-            concise_diagnostics["final_center_error_m"] = float(
-                np.linalg.norm(center - env.config.table_center_xy_m)
-            )
-        details.append(
-            {
-                k: row[k]
+    with _reservation_deadline(time.monotonic() + journal.remaining()):
+        verification = verify_dataset(root / "dataset")
+        if not verification["valid"]:
+            raise RuntimeError("episode artifact verification regression")
+        rows = read_transitions(root / "dataset").to_pylist()
+        details = []
+        for i, row in enumerate(rows):
+            support = read_support(root / "dataset", row["evidence_path"])
+            if i:
+                for suffix in ("observation_id", "rgb_path", "support_path"):
+                    if row[f"before_{suffix}"] != rows[i - 1][f"after_{suffix}"]:
+                        raise RuntimeError("episode observation chain regression")
+                state = read_support(root / "dataset", rows[i - 1]["final_state_path"])
+                handoff = support.get("evidence", {}).get("image_grasp_handoff", {})
+                if handoff.get("before_state_hash") != state["state_hash"]:
+                    raise RuntimeError("episode native state chain regression")
+            diagnostics = support.get("diagnostics", {})
+            concise_diagnostics = {
+                k: diagnostics[k]
                 for k in (
-                    "reason",
-                    "execution_valid",
-                    "coverage_before",
-                    "coverage_after",
-                    "coverage_gain",
+                    "settled",
+                    "max_edge_ratio",
+                    "tracking_error_m",
+                    "final_rms_speed_m_s",
+                    "final_table_containment",
+                    "airborne_hold_seconds",
+                    "airborne_hold_min_clearance_m",
+                    "release_tcp_speed_m_s",
+                    "terminal_observation_valid",
+                    "frozen_laydown_version",
+                    "leading_window_min_fraction",
+                    "execution_mode",
                 )
+                if k in diagnostics
             }
-            | {"diagnostics": concise_diagnostics}
+            state_path = row.get("final_state_path")
+            if row["execution_valid"] and not state_path:
+                raise RuntimeError("missing native terminal state artifact")
+            if state_path:
+                native = read_support(root / "dataset", state_path)
+                p = np.asarray(native["positions"])
+                v = np.asarray(native["velocities"])
+                if (
+                    not np.isfinite(p).all()
+                    or not np.isfinite(v).all()
+                    or not np.asarray(native["free"]).all()
+                ):
+                    raise RuntimeError("native terminal finiteness/ownership regression")
+                center = (p[:, :2].min(0) + p[:, :2].max(0)) / 2
+                concise_diagnostics["final_center_error_m"] = float(
+                    np.linalg.norm(center - env.config.table_center_xy_m)
+                )
+                concise_diagnostics["final_rms_speed_m_s"] = float(
+                    np.sqrt(np.mean(np.sum(v**2, axis=1)))
+                )
+            details.append(
+                {
+                    k: row[k]
+                    for k in (
+                        "reason",
+                        "execution_valid",
+                        "coverage_before",
+                        "coverage_after",
+                        "coverage_gain",
+                    )
+                }
+                | {
+                    "diagnostics": concise_diagnostics,
+                    "predicted_gain": support.get("evidence", {})
+                    .get("selection", {})
+                    .get("predicted_gain"),
+                }
+            )
+        summary = report["episode_reports"][0]
+        last = details[-1] if details else None
+        good = bool(
+            last
+            and last["execution_valid"]
+            and last["diagnostics"].get("settled") is True
+            and summary.get("end_reason")
+            not in ("no_valid_pair", "selection_error", "max_wall_seconds")
         )
-    summary = report["episode_reports"][0]
-    last = details[-1] if details else None
-    good = bool(
-        last
-        and last["execution_valid"]
-        and last["diagnostics"].get("settled") is True
-        and summary.get("end_reason")
-        not in ("no_valid_pair", "selection_error", "max_wall_seconds")
-    )
-    if not last and summary.get("lifecycle") == "initially_unfolded":
-        good = True
-    score = (last["coverage_after"] if last else summary["initial_coverage"]) if good else 0.0
-    result = {
-        "episode": name,
-        "case": case["id"],
-        "family": case["family"],
-        "split": case["split"],
-        "score": score,
-        "failed": not good,
-        "actions": details,
-        "collection": report,
-        "dataset_manifest_sha256": file_sha256(root / "dataset" / "manifest.json"),
-        "fatal": executor.fatal or policy.fatal,
-    }
-    write(root, "result.json", result)
-    print(f"{name}: {len(rows)} actions, score={score:.4f}, failed={not good}", flush=True)
-    if executor.fatal or policy.fatal or report.get("reset_failures"):
-        raise RuntimeError(executor.fatal or policy.fatal or "fixture restoration failure")
-    return result
+        if not last and summary.get("lifecycle") == "initially_unfolded":
+            good = True
+        score = (last["coverage_after"] if last else summary["initial_coverage"]) if good else 0.0
+        result = {
+            "episode": name,
+            "case": case["id"],
+            "family": case["family"],
+            "split": case["split"],
+            "score": score,
+            "failed": not good,
+            "actions": details,
+            "collection": report,
+            "dataset_manifest_sha256": file_sha256(root / "dataset" / "manifest.json"),
+            "fatal": executor.fatal or policy.fatal,
+        }
+        write(root, "result.json", result)
+        print(f"{name}: {len(rows)} actions, score={score:.4f}, failed={not good}", flush=True)
+        if executor.fatal or policy.fatal or report.get("reset_failures"):
+            raise RuntimeError(executor.fatal or policy.fatal or "fixture restoration failure")
+        return result
 
 
 def collection_stage(env, journal, stage):

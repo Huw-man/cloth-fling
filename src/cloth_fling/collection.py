@@ -53,6 +53,20 @@ def _finite_coverage(value):
     return float(value) if value is not None and math.isfinite(value) else None
 
 
+def _table_contained(env):
+    positions = np.asarray(env.get_positions())
+    xmin, xmax, ymin, ymax = env.config.table_bounds_m
+    return bool(
+        np.isfinite(positions).all()
+        and (
+            (positions[:, 0] >= xmin)
+            & (positions[:, 0] <= xmax)
+            & (positions[:, 1] >= ymin)
+            & (positions[:, 1] <= ymax)
+        ).all()
+    )
+
+
 def _initial_coverage(env, state, *, restored, metadata):
     """Read only. A restore needs fixture certification, never an implicit settle."""
     coverage = _finite_coverage(env.coverage()[0]) if hasattr(env, "coverage") else None
@@ -101,6 +115,7 @@ def collect_episodes(
     cloth_id=None,
     episode_metadata=None,
     settled_coverage_threshold=None,
+    success_requires_containment=False,
 ) -> dict:
     """Collect evolving-cloth episodes; see docs/dataset.md for interruption semantics.
 
@@ -135,6 +150,8 @@ def collect_episodes(
     if episode_metadata is not None and not isinstance(episode_metadata, Mapping):
         raise TypeError("episode_metadata must be a mapping or None")
     metadata = jsonable(copy.deepcopy(dict(episode_metadata or {})))
+    if not isinstance(success_requires_containment, bool):
+        raise TypeError("success_requires_containment must be bool")
     if settled_coverage_threshold is not None and (
         isinstance(settled_coverage_threshold, bool)
         or not isinstance(settled_coverage_threshold, (int, float))
@@ -176,6 +193,7 @@ def collect_episodes(
         "stop_reason": "completed",
         "episode_metadata": metadata,
         "settled_coverage_threshold": settled_coverage_threshold,
+        "success_requires_containment": success_requires_containment,
         "timings": {
             "reset_seconds": 0.0,
             "selection_seconds": 0.0,
@@ -402,6 +420,7 @@ def collect_episodes(
                 settled_coverage_threshold is not None
                 and initial_source is not None
                 and initial_coverage >= settled_coverage_threshold
+                and (not success_requires_containment or _table_contained(env))
             )
             for step in range(0 if initially_unfolded else max_actions):
                 if time.monotonic() >= deadline:
@@ -538,6 +557,7 @@ def collect_episodes(
                         confirmed_settled
                         and settled_coverage_threshold is not None
                         and outcome.coverage_after >= settled_coverage_threshold
+                        and (not success_requires_containment or _table_contained(env))
                         and not timed_out
                         and not env_ended
                     )
