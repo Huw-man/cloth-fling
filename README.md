@@ -36,6 +36,10 @@ contact qualification remains incomplete.
 The user-selected [frozen post-grasp laydown](docs/frozen-laydown.md) now adopts an
 already-held native grasp and runs this motion without reattachment or a reset.
 Its versioned configuration is `configs/reference-post-grasp-laydown-v1-frozen.json`.
+The [two-action image-grasp integration pilot](docs/image-grasp-pilot.md) completed
+the selection/attachment/laydown loop twice without resetting. Continuity passed;
+both random grasps reduced coverage and the second action remained unsettled.
+This establishes integration, not useful unfolding or learned behavior.
 
 ## Install and check Genesis 1.4.4
 
