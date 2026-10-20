@@ -13,7 +13,8 @@ extras and the exclusive RTX 5080 lease:
 UV_CACHE_DIR=/tmp/cloth-fling-uv-cache .venv/bin/python -m cloth_fling.reference_pilot
 ```
 
-The default output is `runs/image-grasp-laydown-pilot-20261019/`. The runner claims
+The corrected v2 default output is `runs/image-grasp-laydown-pilot-tugfix-v2-20261019/`.
+The original v1 output remains terminal and untouched. The runner claims
 this directory before opening a scene and refuses any existing output, including
 an interrupted, failed or successful run. No resume or automatic execution retry
 exists. `--output` and `--fixture` select artifact locations; the input fixture must
@@ -51,12 +52,21 @@ physical pinch grasping.
 The dataset, action claims, source fixture, restoration certificate, cleanup and
 report remain under the output directory. The replay is:
 
-`runs/image-grasp-laydown-pilot-20261019/replay/combined.mp4`
+`runs/image-grasp-laydown-pilot-tugfix-v2-20261019/replay/combined.mp4`
 
 Fold generators, broader reset distributions, training, publication, cloud and
 hardware work are deferred. All historical campaigns remain terminal.
 
-## Executed result
+## Historical v1 result and motion-continuity correction
+
+The following original integration verdict checked state chaining and cleanup but
+missed a tug-coordinate defect. Each tug added the world midpoint Y twice,
+commanding lateral jumps of 47.24 mm and 106.44 mm. The corrected saved-command
+assessment rejects both. Preserve the original run, including its report; its
+claim of motion success is superseded. The v2 repeat fixes only this coordinate
+bug and adds a motion-continuity requirement, with the same fixture, RNG and
+two-action/no-reset limits. The second selected pair can differ because it is
+selected from the corrected first action's actual result.
 
 The single authorized episode completed on the RTX 5080 in **80.859 wall seconds**,
 including replay generation, on integrated commit `152333f`. Integration passed:

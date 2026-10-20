@@ -23,7 +23,7 @@ from cloth_fling.spatial_actions import select_spatial_action
 FIXTURE_SHA256 = "04a3b4083011bb2dbb5c749c57918c4090f6bbd5b302c01c267a3c3bfd2167f9"
 FIXTURE_STATE_HASH = "e9b92de2d79a59b21f64029ddad6edf7b86f21184725e9d73dd0f355e4fd0445"
 FIXTURE = "runs/friction-motion-demo-continued-20261019/fixture.json"
-OUTPUT = "runs/image-grasp-laydown-pilot-20261019"
+OUTPUT = "runs/image-grasp-laydown-pilot-tugfix-v2-20261019"
 
 
 def write(root, name, value):
@@ -203,6 +203,54 @@ def collect_pilot(env, root, fixture, deadline):
         env.restore = restore
 
 
+def audit_tug_commands(commands):
+    """Assess executed joins, including off-center shifts hidden by polynomial-only bounds."""
+    lateral = vertical = speed = acceleration = distance = 0.0
+    count = 0
+    valid = bool(commands)
+    anchor = None
+    previous_velocity = np.zeros((2, 3))
+    for index, command in enumerate(commands):
+        if not index or not (command["phase"] == "tug" or commands[index - 1]["phase"] == "tug"):
+            continue
+        previous = commands[index - 1]
+        a = np.asarray(previous["commanded_grasp_positions_m"], dtype=float)
+        b = np.asarray(command["commanded_grasp_positions_m"], dtype=float)
+        dt = command["simulated_seconds"] - previous["simulated_seconds"]
+        if a.shape != (2, 3) or b.shape != (2, 3) or not np.isfinite([a, b]).all() or dt <= 0:
+            valid = False
+            continue
+        if anchor is None:
+            anchor = a.copy()
+        velocity = (b - a) / dt
+        lateral = max(lateral, float(np.abs(b[:, 1] - anchor[:, 1]).max()))
+        vertical = max(vertical, float(np.abs(b[:, 2] - anchor[:, 2]).max()))
+        speed = max(speed, float(np.linalg.norm(velocity, axis=1).max()))
+        acceleration = max(
+            acceleration, float(np.linalg.norm(velocity - previous_velocity, axis=1).max() / dt)
+        )
+        distance = max(distance, float((b[:, 0] - anchor[:, 0]).max()))
+        valid = valid and bool((b[:, 0] >= a[:, 0] - 1e-9).all())
+        previous_velocity = velocity
+        count += int(command["phase"] == "tug")
+    return {
+        "passed": bool(
+            valid
+            and lateral <= 1e-9
+            and vertical <= 1e-9
+            and speed <= 0.8 + 1e-8
+            and acceleration <= 2 + 1e-8
+            and distance <= 0.02 + 1e-9
+        ),
+        "tug_controller_samples": count,
+        "max_lateral_target_error_m": lateral,
+        "max_vertical_target_error_m": vertical,
+        "max_sampled_tcp_speed_m_s": speed,
+        "max_sampled_tcp_acceleration_m_s2": acceleration,
+        "forward_distance_m": distance,
+    }
+
+
 def assess(root):
     root = Path(root)
     verification = verify_dataset(root / "dataset")
@@ -231,6 +279,7 @@ def assess(root):
                 "coverage_gain": row["coverage_gain"],
                 "diagnostics": evidence["diagnostics"],
                 "cleanup_passed": certificate["passed"],
+                "tug_continuity": audit_tug_commands(evidence["evidence"].get("commands", [])),
             }
         )
     passed = bool(
@@ -238,7 +287,10 @@ def assess(root):
         and continuity
         and json.loads((root / "restoration.json").read_text())["passed"]
         and all(
-            d["execution_valid"] and d["reason"] == "completed" and d["cleanup_passed"]
+            d["execution_valid"]
+            and d["reason"] == "completed"
+            and d["cleanup_passed"]
+            and d["tug_continuity"]["passed"]
             for d in details
         )
     )
