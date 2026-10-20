@@ -316,6 +316,23 @@ def test_max_frames_is_explicit_truncation(tmp_path):
     assert metadata["truncated"] and metadata["videos"][-1]["frames"] == 2
 
 
+def test_reference_dataset_uses_wide_cameras_without_executing_physics(tmp_path, monkeypatch):
+    from cloth_fling.reference_surface import diagonal_scene
+
+    state = snapshot()
+    state["config_json"] = json.dumps(diagonal_scene().to_dict())
+    state["state_hash"] = _state_hash(state)
+    monkeypatch.setattr(sys.modules[__name__], "snapshot", lambda: state)
+    root = tmp_path / "data"
+    dataset(root)
+    metadata = render_replay(
+        root, tmp_path / "video", backend_factory=ReplayEnv, writer_factory=Encoder
+    )
+    assert metadata["view_poses"]["overhead"]["pos"] == (0.55, 0, 2.9)
+    assert metadata["view_poses"]["oblique"]["pos"] == (1.9, -1.9, 1.7)
+    assert metadata["physics_reexecuted"] is False
+
+
 def test_import_and_inspection_work_with_sim_video_dependencies_blocked(tmp_path):
     path = diagnostic(tmp_path / "diagnostic")
     code = """
