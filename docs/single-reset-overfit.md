@@ -89,3 +89,7 @@ the best greedy episode (or best collected episode if fitting never began), all 
 failures and the unmet criteria. Replays reconstruct saved geometry without physics.
 Return project-relative replay paths without opening viewer panes. Historical campaigns
 remain terminal and unchanged.
+
+The first campaign is now terminal and incomplete; see
+[`single-reset-overfit-results.md`](single-reset-overfit-results.md). Do not restart
+it or use unused budget for additional collection or fitting.
