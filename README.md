@@ -35,11 +35,13 @@ release and settling with .9798 coverage. Physics and trajectory were unchanged;
 contact qualification remains incomplete.
 The user-selected [frozen post-grasp laydown](docs/frozen-laydown.md) now adopts an
 already-held native grasp and runs this motion without reattachment or a reset.
-Its versioned configuration is `configs/reference-post-grasp-laydown-v1-frozen.json`.
+Its current configuration is `configs/reference-post-grasp-laydown-v2-frozen.json`,
+which corrects duplicated midpoint Y in off-center tugs; v1 remains historical.
 The [two-action image-grasp integration pilot](docs/image-grasp-pilot.md) completed
 the selection/attachment/laydown loop twice without resetting. Continuity passed;
 both random grasps reduced coverage and the second action remained unsettled.
-This establishes integration, not useful unfolding or learned behavior.
+The original verdict missed lateral jumps in the final tug and is superseded for
+motion continuity. A bounded repeat uses the corrected v2 motion and command audit.
 
 ## Install and check Genesis 1.4.4
 

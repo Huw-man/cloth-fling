@@ -232,3 +232,23 @@ replay. Coverage fell .993333 → .522433 → .293817; the second action did not
 within five seconds. Peak edge ratios were 2.018889 and 2.184940. These remain
 negative placement/material evidence, not unfolding or policy qualification.
 Preserve `runs/image-grasp-laydown-pilot-20261019/`; do not rerun or extend it.
+
+## Tug-frame correction and bounded repeat (new authorization)
+
+The user authorized correcting the final tug's duplicated midpoint-Y offset and
+repeating the same image-grasp experiment once. The original pilot's integration
+verdict omitted motion continuity: its tugs commanded unintended lateral jumps
+of 47.24 mm and 106.44 mm. Preserve that archive and its original reports; the
+corrected saved-command assessment rejects it. Do not treat it as motion success.
+
+`reference_post_grasp_laydown_v2` freezes the coordinate correction, with identical
+scene/physics, diagonal geometry, schedule and tug limits. V1 configuration bytes
+remain historical; reproduce v1 code at commit `152333f`. The current API defaults
+to v2 and verifies its new implementation hashes. See `docs/frozen-laydown.md`.
+One new episode may use the same exact fixture, RNG 100 and at most two evolving
+image-selected grasps, with no reset between actions, no reroll or uncertain retry.
+Keep the one-hour total and 35 simulated/180 wall-second action bounds. Record
+placement/settling failures and material strain separately, and require native
+cleanup plus saved-command tug continuity for integration success. No tuning,
+training, broad collection, cloud, hardware or viewer panes. Preserve the separate
+repeat in `runs/image-grasp-laydown-pilot-tugfix-v2-20261019/`.

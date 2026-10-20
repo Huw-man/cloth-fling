@@ -225,6 +225,9 @@ class DiagonalMotion(LeadingMotion):
                     self.tug_stop_reason = "incipient_body_slip"
                     break
             start = self.target.mean(axis=0)
+            # curve() adds the held midpoint Y; segments use midpoint-relative Y.
+            # A world-Y start would add that offset twice at the first substep.
+            start[1] = 0.0
             self.curve(
                 Quintic.between("tug", 0.1, start, start + [0.001, 0, 0], [0, 0, 0], [0, 0, 0])
             )

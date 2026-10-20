@@ -1,8 +1,8 @@
 # Frozen laydown after grasp
 
-`reference_post_grasp_laydown_v1` is the user-selected continuation from the
-completed demonstration in `docs/friction-motion-continued.md`. The operator
-configuration is `configs/reference-post-grasp-laydown-v1-frozen.json`; an identical
+`reference_post_grasp_laydown_v2` corrects the final tug of the user-selected
+continuation from `docs/friction-motion-continued.md`. The operator
+configuration is `configs/reference-post-grasp-laydown-v2-frozen.json`; an identical
 packaged copy lets installed code load it without a checkout or run directory.
 The specification pins controller implementation hashes, the reference physical
 configuration, exact trajectory coefficients/schedule, and the selected run,
@@ -63,7 +63,30 @@ Numerical/domain/deformation/ownership/deadline and native release/cleanup stops
 remain. This is the existing `demonstration` execution policy, now selected as the
 frozen post-grasp continuation; historical qualification defaults are unchanged.
 
-## Evidence and verification scope
+## V2 coordinate correction
+
+The curve executor adds the held midpoint Y to its Y-relative segments. The old
+tug supplied world Y instead, adding the offset twice at its first native substep.
+V2 supplies zero relative Y for every tug increment. Its existing 1 mm forward
+quintic therefore preserves each pin's Y and Z continuously, including off-center
+grasps. Scene, friction, geometry, schedule, tug limits and placement policy are
+unchanged. No motion tuning is included.
+
+The v1 configuration and packaged copy retain their original bytes and hashes;
+checkout commit `152333f` to reproduce the old controller. The current API uses v2
+and its updated controller hash. The original favorable demonstration executed no
+tug, so it did not exercise the defect. The first image-grasp pilot did: its two
+unintended Y jumps were 47.24 mm and 106.44 mm. Its recorded integration verdict
+is superseded for motion continuity; its archive remains untouched.
+
+Regression tests execute all 20 tug increments at the native 1 ms target cadence
+for centered, positive-Y and both observed negative-Y grasp offsets. They check
+the initial join, fixed per-pin Y/Z, total forward displacement and speed/
+acceleration bounds. The pilot now independently assesses recorded tug targets,
+including entry and exit, and rejects the original jumps. Its repeat is separate
+evidence in `docs/image-grasp-pilot.md`.
+
+## Historical v1 evidence and verification scope
 
 The user approved one favorable-grasp native demonstration: .979767 final
 coverage, full table containment, three seconds airborne, finite state, settled
