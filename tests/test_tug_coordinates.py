@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 from test_reference_diagonal import DemonstrationFake
 
-from cloth_fling.frozen_laydown import frozen_laydown_spec
 from cloth_fling.reference_diagonal_motion import DiagonalMotion
 from cloth_fling.reference_pilot import audit_tug_commands
 from cloth_fling.reference_trajectory import Quintic
@@ -89,7 +88,8 @@ def test_v2_preserves_v1_archive_and_changes_only_tug_frame_and_implementation_i
         == "8324d77b515b32f5a85689462e568e6a24c629fba3eb9ae8b9586bb3917c317f"
     )
     assert old_path.read_bytes() == (root / "src/cloth_fling/profiles" / old_path.name).read_bytes()
-    old, new = json.loads(old_path.read_text()), frozen_laydown_spec()
+    old = json.loads(old_path.read_text())
+    new = json.loads((root / "configs/reference-post-grasp-laydown-v2-frozen.json").read_text())
     for key in ("scene", "trajectory", "schedule", "reference_evidence", "handoff"):
         assert new[key] == old[key]
     assert new["controller"].pop("tug_coordinate_frame") == "midpoint_relative_Y"

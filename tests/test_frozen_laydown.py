@@ -53,7 +53,7 @@ def test_existing_grasp_handoff_matches_frozen_motion_without_reset_or_reattachm
     reference = execute_diagonal_action(
         baseline,
         ACTION,
-        DiagonalTrajectory(),
+        DiagonalTrajectory(**frozen_laydown_spec()["trajectory"]),
         expected_ids=(0, 20),
         cleanup_callback=lambda value: None,
         execution_mode="demonstration",
@@ -159,9 +159,13 @@ def test_frozen_artifacts_match_the_selected_trajectory_and_packaged_copy():
         root / "src/cloth_fling/profiles" / CONFIG_NAME
     ).read_bytes()
     assert spec["version"] == VERSION
-    assert spec["trajectory"]["endpoint_x_m"] == 0.78
+    assert spec["trajectory"]["endpoint_x_m"] == 0.73
     assert spec["trajectory"]["diagonal_seconds"] == 6
-    assert spec["schedule"] == diagonal_schedule(DiagonalTrajectory())[1]
+    actual_schedule = diagonal_schedule(DiagonalTrajectory(**spec["trajectory"]))[1]
+    frozen_schedule = dict(spec["schedule"])
+    for key in ("peak_speed_m_s", "peak_acceleration_m_s2"):
+        assert frozen_schedule.pop(key) == pytest.approx(actual_schedule.pop(key), abs=1e-12)
+    assert frozen_schedule == actual_schedule
     assert spec["scene"] == json.loads(json.dumps(diagonal_scene().to_dict()))
     assert not spec["reference_evidence"]["qualification_complete"]
     assert spec["reference_evidence"]["coverage_after"] == pytest.approx(0.9797666666666668)
@@ -170,7 +174,7 @@ def test_frozen_artifacts_match_the_selected_trajectory_and_packaged_copy():
 
 
 def test_freeze_loader_is_offline_and_independent_of_the_current_working_directory(tmp_path):
-    code = "import sys; from cloth_fling.frozen_laydown import frozen_laydown_spec; assert frozen_laydown_spec()['version']=='reference_post_grasp_laydown_v2'; assert 'genesis' not in sys.modules and 'torch' not in sys.modules"
+    code = "import sys; from cloth_fling.frozen_laydown import frozen_laydown_spec; assert frozen_laydown_spec()['version']=='reference_post_grasp_laydown_v3'; assert 'genesis' not in sys.modules and 'torch' not in sys.modules"
     import os
 
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")}

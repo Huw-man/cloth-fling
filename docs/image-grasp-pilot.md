@@ -13,8 +13,8 @@ extras and the exclusive RTX 5080 lease:
 UV_CACHE_DIR=/tmp/cloth-fling-uv-cache .venv/bin/python -m cloth_fling.reference_pilot
 ```
 
-The corrected v2 default output is `runs/image-grasp-laydown-pilot-tugfix-v2-20261019/`.
-The original v1 output remains terminal and untouched. The runner claims
+The current v3 default output is `runs/image-grasp-laydown-pilot-drag-v3-20261019/`.
+The original v1/v2 outputs remain terminal and untouched. The runner claims
 this directory before opening a scene and refuses any existing output, including
 an interrupted, failed or successful run. No resume or automatic execution retry
 exists. `--output` and `--fixture` select artifact locations; the input fixture must
@@ -52,12 +52,28 @@ physical pinch grasping.
 The dataset, action claims, source fixture, restoration certificate, cleanup and
 report remain under the output directory. The replay is:
 
-`runs/image-grasp-laydown-pilot-tugfix-v2-20261019/replay/combined.mp4`
+`runs/image-grasp-laydown-pilot-drag-v3-20261019/replay/combined.mp4`
 
 Fold generators, broader reset distributions, training, publication, cloud and
 hardware work are deferred. All historical campaigns remain terminal.
 
-## Corrected v2 repeat result
+## V3 longer drag and centered placement
+
+The current user-requested revision uses a continuous 12 cm / two-second drag,
+one-fifth of the cloth length. The diagonal ends at X=.73 m before dragging to
+X=.85 m, allowing .30 m of trailing cloth to place its nominal center at X=.55 m.
+Y and height stay fixed during the drag. This replaces the adaptive tug's early
+slack/body-slip stops, while preserving all physical execution safeguards.
+Scene, physics, fixture, RNG 100, two-action/no-reset limits and one-hour ceiling
+are unchanged. No historical run is resumed or extended.
+
+The report measures coverage before/after the drag separately from full-action
+coverage change. It also records the final cloth footprint center, tabletop
+center (.55, 0) m and the X/Y centering error. Integration requires the full 12 cm
+target displacement and bounded continuous commands; placement quality and strain
+remain separate measurements.
+
+## Historical corrected v2 repeat result
 
 The single authorized repeat completed on the RTX 5080 in **97.480 wall seconds**,
 including saved-state replay generation, on integrated commit `03787f0`. Both

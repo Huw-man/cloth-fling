@@ -23,7 +23,7 @@ from cloth_fling.spatial_actions import select_spatial_action
 FIXTURE_SHA256 = "04a3b4083011bb2dbb5c749c57918c4090f6bbd5b302c01c267a3c3bfd2167f9"
 FIXTURE_STATE_HASH = "e9b92de2d79a59b21f64029ddad6edf7b86f21184725e9d73dd0f355e4fd0445"
 FIXTURE = "runs/friction-motion-demo-continued-20261019/fixture.json"
-OUTPUT = "runs/image-grasp-laydown-pilot-tugfix-v2-20261019"
+OUTPUT = "runs/image-grasp-laydown-pilot-drag-v3-20261019"
 
 
 def write(root, name, value):
@@ -203,7 +203,7 @@ def collect_pilot(env, root, fixture, deadline):
         env.restore = restore
 
 
-def audit_tug_commands(commands):
+def audit_tug_commands(commands, *, target_distance_m=None):
     """Assess executed joins, including off-center shifts hidden by polynomial-only bounds."""
     lateral = vertical = speed = acceleration = distance = 0.0
     count = 0
@@ -240,7 +240,8 @@ def audit_tug_commands(commands):
             and vertical <= 1e-9
             and speed <= 0.8 + 1e-8
             and acceleration <= 2 + 1e-8
-            and distance <= 0.02 + 1e-9
+            and distance <= (target_distance_m if target_distance_m is not None else 0.02) + 1e-9
+            and (target_distance_m is None or abs(distance - target_distance_m) <= 1e-8)
         ),
         "tug_controller_samples": count,
         "max_lateral_target_error_m": lateral,
@@ -269,6 +270,20 @@ def assess(root):
     for index, row in enumerate(rows):
         evidence = read_support(root / "dataset", row["evidence_path"])
         certificate = json.loads((root / f"action-{index:02d}-cleanup.json").read_text())
+        phase_coverage = {
+            trace["phase"]: trace.get("coverage")
+            for trace in evidence["evidence"].get("phase_traces", [])
+            if trace["phase"] in ("boundary_tug", "boundary_endpoint_hold")
+        }
+        drag_before = phase_coverage.get("boundary_tug")
+        drag_after = phase_coverage.get("boundary_endpoint_hold")
+        terminal_state = read_support(root / "dataset", row["final_state_path"])
+        terminal_positions = np.asarray(terminal_state["positions"])
+        footprint_center = (
+            terminal_positions[:, :2].min(axis=0) + terminal_positions[:, :2].max(axis=0)
+        ) / 2
+        scene = json.loads(terminal_state["config_json"])
+        workspace_center = np.asarray(scene["table_center_xy_m"])
         details.append(
             {
                 "step": index,
@@ -279,7 +294,26 @@ def assess(root):
                 "coverage_gain": row["coverage_gain"],
                 "diagnostics": evidence["diagnostics"],
                 "cleanup_passed": certificate["passed"],
-                "tug_continuity": audit_tug_commands(evidence["evidence"].get("commands", [])),
+                "final_footprint_center_xy_m": footprint_center,
+                "workspace_center_xy_m": workspace_center,
+                "final_center_error_xy_m": footprint_center - workspace_center,
+                "final_center_error_m": float(np.linalg.norm(footprint_center - workspace_center)),
+                "final_drag_coverage_before": drag_before,
+                "final_drag_coverage_after": drag_after,
+                "final_drag_coverage_gain": (
+                    drag_after - drag_before
+                    if drag_before is not None and drag_after is not None
+                    else None
+                ),
+                "tug_continuity": audit_tug_commands(
+                    evidence["evidence"].get("commands", []),
+                    target_distance_m=(
+                        evidence["evidence"].get("trajectory", {}).get("max_tug_m")
+                        if evidence["evidence"].get("trajectory", {}).get("version")
+                        == "reference_diagonal_drag_v4"
+                        else None
+                    ),
+                ),
             }
         )
     passed = bool(
