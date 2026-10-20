@@ -399,3 +399,16 @@ reserving the final two hours from preparation/collection. Use an isolated Herdr
 worktree, audited local integration and the exclusive RTX 5080 lease. No uncertain
 retries, fixture substitutions, physics tuning or extensions. Historical campaigns
 remain terminal. Replays are delivered as project-relative paths without panes.
+
+The first near-half-fold campaign is terminal and incomplete: all twelve fixtures
+prepared successfully, but an outer-stage timer conflicted with the collector timer
+before the first episode restored its fixture. Zero action intents/rows, no fitting
+and no evaluation. Independent cleanup passed and the GPU lease is free. The timer
+ownership bug is fixed with CPU regression tests; original execution evidence and
+fixtures remain immutable. See `docs/near-half-fold-pilot-results.md`. The corrected
+execution uses a fresh root and the same twelve frozen fixtures, carries the first
+failed initialization as a consumed episode slot, and charges original preparation
+time against the same six-hour ceiling. A one-time transfer requires proof of zero
+action intents/rows, the specific pre-restoration timer collision, and certified
+cleanup. It cannot retry that episode, restore a failed root or extend any budget.
+No physics or motion change was made.
