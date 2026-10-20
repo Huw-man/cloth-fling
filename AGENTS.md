@@ -252,3 +252,12 @@ placement/settling failures and material strain separately, and require native
 cleanup plus saved-command tug continuity for integration success. No tuning,
 training, broad collection, cloud, hardware or viewer panes. Preserve the separate
 repeat in `runs/image-grasp-laydown-pilot-tugfix-v2-20261019/`.
+
+That repeat is now terminal and complete for this correction/integration slice:
+both actions completed, both 2 mm tugs preserved Y (maximum error 6.94e−18 m),
+both cloth states settled, and native ownership/release/cleanup and exact state
+continuity passed. Coverage was .993333 → .449317 → .625150; peak local edge
+ratios were 1.564957 and 1.661032. The 97.480 wall-second total includes replay.
+All 514 CPU tests passed, and the saved-command audit rejects the original jumps.
+No useful general grasp selection or material qualification follows; no further
+episodes or retries are authorized by this completed run.

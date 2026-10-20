@@ -57,6 +57,53 @@ report remain under the output directory. The replay is:
 Fold generators, broader reset distributions, training, publication, cloud and
 hardware work are deferred. All historical campaigns remain terminal.
 
+## Corrected v2 repeat result
+
+The single authorized repeat completed on the RTX 5080 in **97.480 wall seconds**,
+including saved-state replay generation, on integrated commit `03787f0`. Both
+actions completed with exact state/observation continuity, native ownership and
+release/cleanup verification. This time the recorded tug entry/exit commands also
+passed continuity and kinematic checks. Both tugs moved forward 2 mm while keeping
+each pin's Y and height fixed. The largest lateral target error was 6.94e−18 m;
+the largest sampled tug speed/acceleration were .018256 m/s and .504 m/s².
+
+The exact original fixture and RNG 100 were reused. The first selected pair and
+pixels matched the original run exactly. The second pair was selected from the
+corrected first action's resulting image, without any reset or substitution.
+
+| Measurement | Action 0 | Action 1 |
+| --- | --- | --- |
+| Selected native IDs in execution order | 1568, 1914 | 132, 1204 |
+| Incoming simulation time, s | 0 | 20.04 |
+| Action simulation duration, s | 20.04 | 32.34 |
+| Coverage before → after | .993333 → .449317 | .449317 → .625150 |
+| Signed coverage change | −.544017 | +.175833 |
+| Whole-cloth airborne hold, s | 3 | 3 |
+| Minimum airborne clearance, m | .147586 | .117014 |
+| Maximum pin tracking error, m | 4.10e−8 | 4.15e−8 |
+| Final whole-cloth RMS speed, m/s | .002803 | .002562 |
+| Settled within the fixed allowance | Yes | Yes |
+| Final tabletop containment | 100% | 100% |
+| Peak local material edge ratio | 1.564957 | 1.661032 |
+
+The discontinuity is corrected; random grasp quality remains unqualified. The
+second action improved coverage, but the episode still ended below its nearly
+flat initial coverage. Material deformation remains substantial and unqualified.
+The scene, contact parameters, diagonal geometry and timing limits were unchanged.
+
+All 514 CPU tests passed (eight GPU tests deselected); 33 focused tests passed on
+integrated main. The new saved-command audit rejects the original pilot's two
+jumps. Independent native-state checks found finite states, consistent ownership,
+zero release-velocity error, no positive friction work and no friction on pins.
+All three replay files fully decoded: 527 frames, 10 fps, 52.7 seconds. Sampled
+frames were inspected without a viewer pane. The GPU lease was released and no
+compute jobs remained. This repeat is terminal; no rerolls or further episodes ran.
+
+The report, native log, verification, independent cleanup certificates and dataset
+are in `runs/image-grasp-laydown-pilot-tugfix-v2-20261019/`. CPU logs and the separate
+assessment rejecting the untouched original run are preserved under
+`runs/tug-frame-v2-verification/`.
+
 ## Historical v1 result and motion-continuity correction
 
 The following original integration verdict checked state chaining and cleanup but
