@@ -198,3 +198,33 @@ def test_project_rgb_action_label_parity_and_null_ineligible(tmp_path, monkeypat
     projected = release_data.project_episode(tmp_path, 'episode')[0]
     assert not projected['eligible'] and projected['supervised_target'] is None
     assert projected['coverage_gain'] == -.25 and projected['failed']
+
+
+def test_busy_lease_prevents_checkpoint_gpu_allocation(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    from cloth_fling import reference_run
+
+    root = tmp_path / 'data'
+    root.mkdir()
+    release_data.write_json(root / 'fixtures-manifest.json', {})
+    release_data.write_json(root / 'release-manifest.json', {})
+    checkpoint = tmp_path / 'model.pt'
+    checkpoint.write_bytes(b'weights')
+    monkeypatch.setattr(policy, 'fixture_bundles', lambda *a: [({'id': 'f'}, {})])
+    monkeypatch.setattr(policy.learning, 'predictor', lambda *a, **k: pytest.fail('allocated model'))
+
+    @contextmanager
+    def busy(_):
+        raise RuntimeError('lease busy')
+        yield
+
+    monkeypatch.setattr(reference_run, 'reference_lease', busy)
+    args = build_parser().parse_args([
+        'policy', 'evaluate', '--mode', 'sim', '--fixtures', str(root),
+        '--checkpoint', str(checkpoint), '--output', str(tmp_path / 'out'), '--device', 'cuda',
+    ])
+    with pytest.raises(RuntimeError, match='lease busy'):
+        policy.simulate(args, backend_factory=lambda *a: pytest.fail('opened scene'))
+    report = json.loads((tmp_path / 'out/report.json').read_text())
+    assert report['status'] == 'failed' and report['action_intents'] == 0

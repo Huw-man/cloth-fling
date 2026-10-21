@@ -215,8 +215,6 @@ def simulate(args, *, backend_factory=None):
     for ref, expected in spec['implementation_sha256'].items():
         if file_sha256(Path(__file__).parent / ref) != expected:
             raise ValueError(f'frozen implementation changed: {ref}')
-    predict = None if collect else (custom_predictor(args.predictor) if args.predictor
-                                    else learning.predictor(args.checkpoint, device=args.device))
     args.output.mkdir(parents=True, exist_ok=False)
     from cloth_fling.learning_pilot import implementation_identity
     from cloth_fling.provenance import runtime_provenance
@@ -240,6 +238,10 @@ def simulate(args, *, backend_factory=None):
     try:
         with reference_lease(args.output):
             try:
+                predict = None if collect else (
+                    custom_predictor(args.predictor) if args.predictor
+                    else learning.predictor(args.checkpoint, device=args.device)
+                )
                 if backend_factory is None:
                     from cloth_fling.sim.reference import ReferenceBackend
                     backend_factory = ReferenceBackend
