@@ -412,3 +412,16 @@ time against the same six-hour ceiling. A one-time transfer requires proof of ze
 action intents/rows, the specific pre-restoration timer collision, and certified
 cleanup. It cannot retry that episode, restore a failed root or extend any budget.
 No physics or motion change was made.
+
+The corrected near-half-fold run is terminal and incomplete after 62 action
+attempts/rows and one 2,000-step fit on 51 eligible samples. The active executing
+worktree was removed during refresh; attempt 62 acquired its pins but could not
+load the frozen trajectory file. Its release/cleanup passed, and the missing
+trajectory is explicitly retained. No retry, second fit, validation or test ran.
+Best settled contained exploration action was .739267; best terminal .701167;
+no .80 success. See `docs/near-half-fold-pilot-results.md` and
+`runs/near-half-fold-pilot-v1-corrected/`. All GPU work is closed out. Do not resume
+this physical/uncertain campaign through the zero-action transfer path. Before
+future native runs, lock the executing Git worktree against removal and retain it
+until simulation, fitting, reporting and replay have all ended; merged source is
+still a live runtime dependency. Do not clean up another active worktree.
