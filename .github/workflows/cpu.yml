@@ -11,7 +11,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '${{ matrix.python }}'
-      - run: pip install '.[dev,train]' build
+      - run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install '.[dev,train]' build
       - run: ruff check src tests scripts
       - run: pytest -m 'not gpu'
       - run: python -m build
@@ -23,6 +25,7 @@ jobs:
           /tmp/cloth-base/bin/cloth-fling policy --help
       - run: |
           python -m venv /tmp/cloth-train
+          /tmp/cloth-train/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
           /tmp/cloth-train/bin/pip install "$(find dist -name '*.whl')[train]"
           cd /tmp
-          /tmp/cloth-train/bin/python -c "import importlib.util, torch; assert importlib.util.find_spec('genesis') is None; from cloth_fling.learning import build_model; build_model()"
+          /tmp/cloth-train/bin/python -c "import importlib.util, torch; assert importlib.util.find_spec('genesis') is None; from cloth_fling.learning import build_model; from cloth_fling.frozen_laydown import frozen_laydown_spec; build_model(); frozen_laydown_spec()"

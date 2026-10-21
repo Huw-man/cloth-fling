@@ -24,10 +24,10 @@ pip install '.[train]' huggingface_hub
 ```
 
 For lightweight Parquet/image readers only, use `pip install .` instead.
-For NVIDIA simulation, install `pip install '.[sim]'` (Genesis 1.4.4 and Torch).
-On the tested RTX 5080, use CUDA 12.8 Torch wheels:
-`pip install torch --index-url https://download.pytorch.org/whl/cu128`.
-With uv, `uv sync --extra sim` selects that index automatically.
+For NVIDIA simulation, `uv sync --locked --extra sim` selects the tested Genesis
+1.4.4 and CUDA 12.8 Torch lock. With pip on the tested RTX 5080, install
+`pip install 'torch==2.11.0' --index-url https://download.pytorch.org/whl/cu128`,
+then `pip install '.[sim]'`.
 
 ## Download dataset v1
 
@@ -70,13 +70,13 @@ Collection uses only training fixtures. Evaluation defaults to validation fixtur
 
 ```bash
 cloth-fling policy collect --fixtures data/cloth-fling-v1 --output runs/collection --episodes 1
-cloth-fling policy train --dataset runs/collection/examples --output runs/collected-model
 cloth-fling policy evaluate --mode sim --fixtures data/cloth-fling-v1 --checkpoint runs/cpu-model/model.pt --output runs/sim-validation --device cuda
 ```
 
-A very small collection may contain fewer than the required 32 eligible training
-examples; collect more episodes to a fresh directory when needed. Downloaded v1
-already has 272 training examples. `--fixture-id` restricts simulation to one
+A collection needs at least 32 eligible examples before fitting; collect more
+episodes to a fresh directory when needed, then pass `--dataset
+runs/collection/examples` to `policy train`. Downloaded v1 already has 272 training
+examples. `--fixture-id` restricts simulation to one
 fixture in the selected split. Defaults are at most three actions, stopping on
 settled, fully contained 80% coverage, with 35 simulated / 180 wall seconds per
 action and a one-hour command ceiling (`--max-wall-seconds` can reduce it).

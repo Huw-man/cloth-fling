@@ -4,41 +4,41 @@ Robotless cloth unfolding with overhead RGB, two explicitly assisted grasp point
 deterministic motion primitives, and local Parquet/image/state datasets. Inspired by
 [FlingBot](https://proceedings.mlr.press/v164/ha22a.html).
 
-The [milestone 3 benchmark](docs/milestone3.md) adds bounded `benchmark prepare`,
+The [milestone 3 benchmark](milestone3.md) adds bounded `benchmark prepare`,
 `qualify`, `pilot`, and `report` stages. Its first run stopped at preparation:
 six development bunches qualified, but only five of the required six held-out
-bunches qualified. See [results](docs/milestone3-results.md). Motion and pilot
+bunches qualified. See [results](milestone3-results.md). Motion and pilot
 behavior remain unqualified; the frozen failed manifest cannot resume simulation.
 
 ## Reference towel profile
 
-A separate [reference environment](docs/reference-environment.md) adds the supplied
+A separate [reference environment](reference-environment.md) adds the supplied
 0.60 × 0.40 m towel physics, two single-vertex pins, prescribed retained-grasp laydown,
 and learning-ready FlingBot-style RGB grasp action maps. Its bounded entrypoint is
 `cloth-fling reference qualify --output runs/reference-laydown-v1`. Training and
 dynamic-fling reproduction are deferred; this profile does not resume milestone 3.
-The separate [leading-edge development campaign](docs/reference-leading.md) adds
+The separate [leading-edge development campaign](reference-leading.md) adds
 `reference tune` with a frozen trajectory grid and durable attempt accounting.
-Its [frozen favorable-grasp trajectory passed three confirmations](docs/reference-leading-results.md).
-The new [progressive diagonal/contact implementation](docs/reference-diagonal.md)
+Its [frozen favorable-grasp trajectory passed three confirmations](reference-leading-results.md).
+The new [progressive diagonal/contact implementation](reference-diagonal.md)
 adds position-level friction and a slack-taking tug; its first contact campaign is
-[incomplete](docs/reference-diagonal-results.md), with no motion trials executed.
-The subsequent [requested one-shot demonstration](docs/reference-diagonal-demo.md)
+[incomplete](reference-diagonal-results.md), with no motion trials executed.
+The subsequent [requested one-shot demonstration](reference-diagonal-demo.md)
 also stopped at contact qualification: sliding failed the half-timestep check.
-The later [exploratory motion run](docs/friction-motion-demo.md) executed a lift,
+The later [exploratory motion run](friction-motion-demo.md) executed a lift,
 airborne hold and partial diagonal laydown with the new friction, then stopped on
 deposited-body sliding. Its replay contains actual motion; qualification remains
 incomplete.
 After making placement quality observational, the
-[continued demonstration](docs/friction-motion-continued.md) completed through
+[continued demonstration](friction-motion-continued.md) completed through
 release and settling with .9798 coverage. Physics and trajectory were unchanged;
 contact qualification remains incomplete.
-The user-selected [frozen post-grasp laydown](docs/frozen-laydown.md) now adopts an
+The user-selected [frozen post-grasp laydown](frozen-laydown.md) now adopts an
 already-held native grasp and runs this motion without reattachment or a reset.
 Its current configuration is `configs/reference-post-grasp-laydown-v4-frozen.json`,
 with a 12 cm final drag and a measured-geometry diagonal targeting a centered cloth
 footprint. It retains the off-center tug correction; v1–v3 remain historical.
-The [two-action image-grasp integration pilot](docs/image-grasp-pilot.md) completed
+The [two-action image-grasp integration pilot](image-grasp-pilot.md) completed
 the selection/attachment/laydown loop twice without resetting. Continuity passed;
 both random grasps reduced coverage and the second action remained unsettled.
 The original verdict missed lateral jumps in the final tug and is superseded for
@@ -49,22 +49,22 @@ The latest longer-drag check completed both 12 cm drags and settled 1.38 cm and
 3.20 cm from the workspace center. Drag-only coverage improved by .110200 and
 .043967; overall random-grasp coverage was .993333 → .573267 → .418417.
 The user approved this centered v4 demonstration as the next training-pilot motion
-baseline. Its [approval record](configs/end-to-end-pilot-baseline-v1.json) pins the
+baseline. Its [approval record](../configs/end-to-end-pilot-baseline-v1.json) pins the
 unchanged controller configuration and reviewed native evidence/replay hashes.
 That baseline freeze preserved the fixed continuation before training began.
 
-The [bounded image-grasp learning pilot](docs/image-learning-pilot.md) adds an
+The [bounded image-grasp learning pilot](image-learning-pilot.md) adds an
 RGB value-map learner around that fixed motion, with family-isolated folds, one
 learner-state refresh and a paired three-action test. Use `cloth-fling learning-pilot
 run`; existing/uncertain run roots cannot be resumed. Its eight-hour/432-action
-ceiling is separate from all historical campaigns. Its [completed results](docs/image-learning-pilot-results.md)
+ceiling is separate from all historical campaigns. Its [completed results](image-learning-pilot-results.md)
 show .4764 held-out terminal coverage for the selected learner versus .3518 for
 random selection. Both remain below mean starting coverage .6226; reliable
 unfolding and material fidelity remain unqualified. The run is terminal.
 
-The [single-reset overfitting experiment](docs/single-reset-overfit.md) tests at most
+The [single-reset overfitting experiment](single-reset-overfit.md) tests at most
 three continuous actions from one exact archived reset. Its primary milestone is
-now 80% settled, contained coverage. The [first run](docs/single-reset-overfit-results.md)
+now 80% settled, contained coverage. The [first run](single-reset-overfit-results.md)
 stopped incomplete after 262 attempts on the existing deformation safeguard.
 Best dedicated greedy coverage was .7544; one uniform exploratory action reached
 .8375. No learned checkpoint qualified. `cloth-fling learning-overfit report`
@@ -75,7 +75,7 @@ early stopping, with explicit .98 historical reproduction available.
 
 Version 0.2.0 pins **Genesis 1.4.4**, the latest stable release checked on 2026-10-19,
 and starts a new engine/snapshot compatibility boundary. See the
-[migration record](docs/genesis144-migration.md) for upstream identity, wheel hash,
+[migration record](genesis144-migration.md) for upstream identity, wheel hash,
 locked versions and validation limits. Historical Genesis 0.4.3 results do not qualify
 this runtime. The runtime migration passed its bounded checks; cloth-motion
 campaigns and collection await fresh primitive qualification.
@@ -109,7 +109,7 @@ The normal root `.venv` now uses the upgraded lock. The isolated environment und
 ignored `runs/genesis144/venv` was used to prepare the port before replacing the old
 installation. `doctor` reads package metadata and GPU visibility without importing
 or initializing Genesis/Torch. Installation and GPU visibility alone are not physics
-or rendering qualification. See [runtime checks](docs/runtime.md) for the separately
+or rendering qualification. See [runtime checks](runtime.md) for the separately
 leased, bounded upgraded-runtime probe.
 
 ## Migration gates
@@ -117,7 +117,7 @@ leased, bounded upgraded-runtime probe.
 New CLI scenes use the upgraded `native_coulomb_v2` profile and
 `configs/contact-native-v2.json`.
 Integrated validation: **323 CPU tests and eight GPU tests passed**, plus all three
-contact coupon profiles. The [migration record](docs/genesis144-migration.md#integrated-validation-result)
+contact coupon profiles. The [migration record](genesis144-migration.md#integrated-validation-result)
 separates contact, rendering, state restoration and behavior scope.
 
 The v1 contact profiles remain archival Genesis 0.4.3 configurations. Do not use an
@@ -138,15 +138,15 @@ path with compatible topology; this cannot establish physical continuation.
 
 ## Historical results and experimental profiles
 
-[Milestone 1](docs/milestone1-results.md) and
-[milestone 2](docs/milestone2-results.md) results are **historical Genesis 0.4.3 evidence**.
+[Milestone 1](milestone1-results.md) and
+[milestone 2](milestone2-results.md) results are **historical Genesis 0.4.3 evidence**.
 The previous native-v1 contact measurements, mesh/depth checks, exact restores and
 fixed-fixture laydown results do not transfer to 1.4.4. Their reports and failed outputs
 remain intact for offline inspection.
 
 `configs/primitive-full-lift-laydown-v2.json` retains an experimental 0.30 m laydown and
 0.06 m drag, compared with the 0.12 m reference. Its old fixed-case outcomes are described
-in the [dataset notes](docs/dataset.md#experimental-full-lift-laydown-profile).
+in the [dataset notes](dataset.md#experimental-full-lift-laydown-profile).
 It is unqualified on the new engine. Dynamic fling, reset distributions, grasp selection
 and repeated-action behavior also require separate evidence; none is certified by the
 migration or by successful dataset verification. Old profile names are configuration
@@ -166,8 +166,8 @@ history, not a command to reproduce old physics in the new runtime.
   diagnostic; reliable unfolding remains unqualified. Additional campaigns, collection,
   training, hardware, cloud and publication require new authorization.
 
-See [runtime](docs/runtime.md), [dataset format](docs/dataset.md),
-[primitive diagnostics](docs/primitives.md) and [viewer/replay](docs/viewer.md).
+See [runtime](runtime.md), [dataset format](dataset.md),
+[primitive diagnostics](primitives.md) and [viewer/replay](viewer.md).
 
 ## Development
 
@@ -179,11 +179,11 @@ uv run --locked --extra dev pytest -m 'not gpu'
 GPU checks require the coordinator's exclusive lease. Package 0.2.0 is a local version
 boundary; this migration creates no tag or published release.
 
-The bounded [near-half-fold pilot](docs/near-half-fold-pilot.md) tests the RGB learner
+The bounded [near-half-fold pilot](near-half-fold-pilot.md) tests the RGB learner
 on six training, two validation and four held-out near-half-fold fixtures, with
 80% measured early stopping and a 216-action ceiling. Run with
 `cloth-fling learning-family run`; use `learning-family report` for offline evidence.
-The [family pilot results](docs/near-half-fold-pilot-results.md) preserve twelve
+The [family pilot results](near-half-fold-pilot-results.md) preserve twelve
 fixtures, 62 attempts and a first checkpoint trained on 51 settled samples. The
 corrected run stopped when its executing worktree was removed during refresh;
 cleanup passed, but validation and held-out evaluation remain unrun.
