@@ -1,0 +1,28 @@
+name: CPU and package install
+on: [push, pull_request]
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '${{ matrix.python }}'
+      - run: pip install '.[dev,train]' build
+      - run: ruff check src tests scripts
+      - run: pytest -m 'not gpu'
+      - run: python -m build
+      - run: |
+          python -m venv /tmp/cloth-base
+          /tmp/cloth-base/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/cloth-base/bin/python -c "import sys; import cloth_fling.cli, cloth_fling.release_data; assert 'torch' not in sys.modules; assert 'genesis' not in sys.modules"
+          /tmp/cloth-base/bin/cloth-fling policy --help
+      - run: |
+          python -m venv /tmp/cloth-train
+          /tmp/cloth-train/bin/pip install "$(find dist -name '*.whl')[train]"
+          cd /tmp
+          /tmp/cloth-train/bin/python -c "import importlib.util, torch; assert importlib.util.find_spec('genesis') is None; from cloth_fling.learning import build_model; build_model()"

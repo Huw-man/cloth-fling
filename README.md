@@ -1,188 +1,135 @@
 # cloth-fling
 
-Robotless cloth unfolding with overhead RGB, two explicitly assisted grasp points,
-deterministic motion primitives, and local Parquet/image/state datasets. Inspired by
+A small **dataset → RGB grasp-value model → simulation** workflow. Choose two image
+grasp points; the environment applies assisted vertex pins and executes a frozen
+lift/laydown with a centered 12 cm drag. Inspired by
 [FlingBot](https://proceedings.mlr.press/v164/ha22a.html).
 
-The [milestone 3 benchmark](docs/milestone3.md) adds bounded `benchmark prepare`,
-`qualify`, `pilot`, and `report` stages. Its first run stopped at preparation:
-six development bunches qualified, but only five of the required six held-out
-bunches qualified. See [results](docs/milestone3-results.md). Motion and pilot
-behavior remain unqualified; the frozen failed manifest cannot resume simulation.
+Code: MIT. [Dataset v1](https://huggingface.co/datasets/humannew/cloth-fling):
+CC BY 4.0, 383 recorded actions / 346 eligible examples. Model uploads are deferred.
+This is a small simulation development dataset: the original learned selector beat
+random on held-out starts but both lost coverage. Reliable unfolding, material
+fidelity and physical pinch grasping remain unqualified.
 
-## Reference towel profile
+## Install
 
-A separate [reference environment](docs/reference-environment.md) adds the supplied
-0.60 × 0.40 m towel physics, two single-vertex pins, prescribed retained-grasp laydown,
-and learning-ready FlingBot-style RGB grasp action maps. Its bounded entrypoint is
-`cloth-fling reference qualify --output runs/reference-laydown-v1`. Training and
-dynamic-fling reproduction are deferred; this profile does not resume milestone 3.
-The separate [leading-edge development campaign](docs/reference-leading.md) adds
-`reference tune` with a frozen trajectory grid and durable attempt accounting.
-Its [frozen favorable-grasp trajectory passed three confirmations](docs/reference-leading-results.md).
-The new [progressive diagonal/contact implementation](docs/reference-diagonal.md)
-adds position-level friction and a slack-taking tug; its first contact campaign is
-[incomplete](docs/reference-diagonal-results.md), with no motion trials executed.
-The subsequent [requested one-shot demonstration](docs/reference-diagonal-demo.md)
-also stopped at contact qualification: sliding failed the half-timestep check.
-The later [exploratory motion run](docs/friction-motion-demo.md) executed a lift,
-airborne hold and partial diagonal laydown with the new friction, then stopped on
-deposited-body sliding. Its replay contains actual motion; qualification remains
-incomplete.
-After making placement quality observational, the
-[continued demonstration](docs/friction-motion-continued.md) completed through
-release and settling with .9798 coverage. Physics and trajectory were unchanged;
-contact qualification remains incomplete.
-The user-selected [frozen post-grasp laydown](docs/frozen-laydown.md) now adopts an
-already-held native grasp and runs this motion without reattachment or a reset.
-Its current configuration is `configs/reference-post-grasp-laydown-v4-frozen.json`,
-with a 12 cm final drag and a measured-geometry diagonal targeting a centered cloth
-footprint. It retains the off-center tug correction; v1–v3 remain historical.
-The [two-action image-grasp integration pilot](docs/image-grasp-pilot.md) completed
-the selection/attachment/laydown loop twice without resetting. Continuity passed;
-both random grasps reduced coverage and the second action remained unsettled.
-The original verdict missed lateral jumps in the final tug and is superseded for
-motion continuity. The corrected v2 repeat passed both tug-command audits and
-settled after both actions; coverage was .993333 → .449317 → .625150. General
-grasp selection and material fidelity remain unqualified.
-The latest longer-drag check completed both 12 cm drags and settled 1.38 cm and
-3.20 cm from the workspace center. Drag-only coverage improved by .110200 and
-.043967; overall random-grasp coverage was .993333 → .573267 → .418417.
-The user approved this centered v4 demonstration as the next training-pilot motion
-baseline. Its [approval record](configs/end-to-end-pilot-baseline-v1.json) pins the
-unchanged controller configuration and reviewed native evidence/replay hashes.
-That baseline freeze preserved the fixed continuation before training began.
-
-The [bounded image-grasp learning pilot](docs/image-learning-pilot.md) adds an
-RGB value-map learner around that fixed motion, with family-isolated folds, one
-learner-state refresh and a paired three-action test. Use `cloth-fling learning-pilot
-run`; existing/uncertain run roots cannot be resumed. Its eight-hour/432-action
-ceiling is separate from all historical campaigns. Its [completed results](docs/image-learning-pilot-results.md)
-show .4764 held-out terminal coverage for the selected learner versus .3518 for
-random selection. Both remain below mean starting coverage .6226; reliable
-unfolding and material fidelity remain unqualified. The run is terminal.
-
-The [single-reset overfitting experiment](docs/single-reset-overfit.md) tests at most
-three continuous actions from one exact archived reset. Its primary milestone is
-now 80% settled, contained coverage. The [first run](docs/single-reset-overfit-results.md)
-stopped incomplete after 262 attempts on the existing deformation safeguard.
-Best dedicated greedy coverage was .7544; one uniform exploratory action reached
-.8375. No learned checkpoint qualified. `cloth-fling learning-overfit report`
-reads the archived run without resuming it; future runs default to versioned .80
-early stopping, with explicit .98 historical reproduction available.
-
-## Install and check Genesis 1.4.4
-
-Version 0.2.0 pins **Genesis 1.4.4**, the latest stable release checked on 2026-10-19,
-and starts a new engine/snapshot compatibility boundary. See the
-[migration record](docs/genesis144-migration.md) for upstream identity, wheel hash,
-locked versions and validation limits. Historical Genesis 0.4.3 results do not qualify
-this runtime. The runtime migration passed its bounded checks; cloth-motion
-campaigns and collection await fresh primitive qualification.
-
-Use Python 3.11 or 3.12 and [uv](https://docs.astral.sh/uv/). Run from the repository root:
+Use Python 3.11 or 3.12. Offline model development needs Torch, **not Genesis**:
 
 ```bash
-export UV_CACHE_DIR=/tmp/cloth-fling-uv-cache
-uv sync --locked --extra dev
-uv run --locked cloth-fling doctor
-uv run --locked --extra dev pytest -m 'not gpu'
+git clone https://github.com/huw-man/cloth-fling.git
+cd cloth-fling
+python -m venv .venv
+. .venv/bin/activate
+pip install '.[train]' huggingface_hub
 ```
 
-The base install reads historical datasets without Genesis, Torch or video packages:
+For lightweight Parquet/image readers only, use `pip install .` instead.
+For NVIDIA simulation, install `pip install '.[sim]'` (Genesis 1.4.4 and Torch).
+On the tested RTX 5080, use CUDA 12.8 Torch wheels:
+`pip install torch --index-url https://download.pytorch.org/whl/cu128`.
+With uv, `uv sync --extra sim` selects that index automatically.
+
+## Download dataset v1
 
 ```bash
-uv run --locked cloth-fling dataset verify runs/saved-dataset
-uv run --locked cloth-fling replay runs/saved-diagnostic --inspect
+hf download humannew/cloth-fling --type dataset --revision v1 --local-dir data/cloth-fling-v1
 ```
 
-For simulation dependencies, select the `sim` extra. Torch comes explicitly from the
-CUDA 12.8 index for the RTX 5080 target; Genesis does not declare Torch itself.
-Linux simulation also needs compatible NVIDIA and EGL/OpenGL drivers.
+| Split | Recorded | Eligible |
+|---|---:|---:|
+| Train | 308 | 272 |
+| Validation | 23 | 22 |
+| Test | 52 | 52 |
+
+Parquet files embed before/after RGB, executed grasp coordinates and transforms,
+coverage, labels, failures and episode/reset identities. Negative gains are kept;
+unsettled/ineligible examples have null supervised targets. The separate 21 fixture
+bundles contain privileged simulation state and hashes, never learned inputs.
+See the [dataset card](src/cloth_fling/release_assets/dataset-card.md).
+
+## Train and evaluate offline
+
+Every output directory must be fresh. Paths are explicit; train reads only `train`.
+A short CPU install/checkpoint smoke run is:
 
 ```bash
-uv sync --locked --extra sim --extra dev --extra video
-uv run --locked --extra sim --extra dev --extra video cloth-fling doctor
+cloth-fling policy train --dataset data/cloth-fling-v1 --output runs/cpu-model --steps 2 --device cpu
+cloth-fling policy evaluate --mode offline --dataset data/cloth-fling-v1 --checkpoint runs/cpu-model/model.pt --output runs/validation
 ```
 
-The normal root `.venv` now uses the upgraded lock. The isolated environment under
-ignored `runs/genesis144/venv` was used to prepare the port before replacing the old
-installation. `doctor` reads package metadata and GPU visibility without importing
-or initializing Genesis/Torch. Installation and GPU visibility alone are not physics
-or rendering qualification. See [runtime checks](docs/runtime.md) for the separately
-leased, bounded upgraded-runtime probe.
+Omit `--steps 2` for the existing 2,000-step fit. Validation is the evaluation
+default; selecting test requires `--split test`. Offline reports contain eligible
+example count, MAE, Huber loss (delta .1) and prediction bias (prediction − target)
+at the executed action pixel. This does not measure policy rollout success.
 
-## Migration gates
+## Collect and evaluate in simulation
 
-New CLI scenes use the upgraded `native_coulomb_v2` profile and
-`configs/contact-native-v2.json`.
-Integrated validation: **323 CPU tests and eight GPU tests passed**, plus all three
-contact coupon profiles. The [migration record](docs/genesis144-migration.md#integrated-validation-result)
-separates contact, rendering, state restoration and behavior scope.
-
-The v1 contact profiles remain archival Genesis 0.4.3 configurations. Do not use an
-old contact pass or old snapshot as qualification under Genesis 1.4.4.
-
-The upgraded legacy PBD coupling still omits tangential cloth/rigid friction; rigid
-contact improvements in upstream release notes do not establish cloth-contact fidelity.
-The guarded v2 extension passed the three bounded native/low/high contact profiles.
-Its material values remain engineering priors. Do not relax materials, damping or
-acceptance gates to obtain a pass.
-Dependencies and CPU interface checks precede coordinator-assigned, exclusive RTX 5080
-probes. There is no GPU lease implied by installation or by these example commands.
-
-Snapshots move to schema 2 with engine identity. Old physical states must be rejected
-for restore. Historical Parquet, RGB, NPZ/JSON and offline replay inspection remain
-readable. Historical geometry can be rendered only through an explicit render-only
-path with compatible topology; this cannot establish physical continuation.
-
-## Historical results and experimental profiles
-
-[Milestone 1](docs/milestone1-results.md) and
-[milestone 2](docs/milestone2-results.md) results are **historical Genesis 0.4.3 evidence**.
-The previous native-v1 contact measurements, mesh/depth checks, exact restores and
-fixed-fixture laydown results do not transfer to 1.4.4. Their reports and failed outputs
-remain intact for offline inspection.
-
-`configs/primitive-full-lift-laydown-v2.json` retains an experimental 0.30 m laydown and
-0.06 m drag, compared with the 0.12 m reference. Its old fixed-case outcomes are described
-in the [dataset notes](docs/dataset.md#experimental-full-lift-laydown-profile).
-It is unqualified on the new engine. Dynamic fling, reset distributions, grasp selection
-and repeated-action behavior also require separate evidence; none is certified by the
-migration or by successful dataset verification. Old profile names are configuration
-history, not a command to reproduce old physics in the new runtime.
-
-## Boundaries and artifacts
-
-- Learned-policy input is RGB only. Depth, geometry, attachments, trajectories and
-  coverage are privileged execution/evaluation artifacts.
-- Units are world metres with z up; pixels `(u, v)` start top-left, u right and v down.
-- Motion commands affect attached particles only. Release retains velocity. Explicit
-  contact physics is separate from control.
-- Valid evolving-cloth actions have no intervening reset; invalid attempts and terminal
-  observations are recorded, and valid negative coverage gains are retained.
-- Local datasets store Parquet rows, PNG RGB and NPZ/JSON supporting state. `runs/` is ignored.
-- There are no arms, IK or physical pinch qualification. Local trained checkpoints are
-  diagnostic; reliable unfolding remains unqualified. Additional campaigns, collection,
-  training, hardware, cloud and publication require new authorization.
-
-See [runtime](docs/runtime.md), [dataset format](docs/dataset.md),
-[primitive diagnostics](docs/primitives.md) and [viewer/replay](docs/viewer.md).
-
-## Development
+These commands require the `sim` extra, a free GPU and downloaded fixture bundles.
+Collection uses only training fixtures. Evaluation defaults to validation fixtures;
+`--split test` explicitly selects held-out fixtures. No resets occur inside an episode.
 
 ```bash
-uv run --locked --extra dev ruff check src tests
-uv run --locked --extra dev pytest -m 'not gpu'
+cloth-fling policy collect --fixtures data/cloth-fling-v1 --output runs/collection --episodes 1
+cloth-fling policy train --dataset runs/collection/examples --output runs/collected-model
+cloth-fling policy evaluate --mode sim --fixtures data/cloth-fling-v1 --checkpoint runs/cpu-model/model.pt --output runs/sim-validation --device cuda
 ```
 
-GPU checks require the coordinator's exclusive lease. Package 0.2.0 is a local version
-boundary; this migration creates no tag or published release.
+A very small collection may contain fewer than the required 32 eligible training
+examples; collect more episodes to a fresh directory when needed. Downloaded v1
+already has 272 training examples. `--fixture-id` restricts simulation to one
+fixture in the selected split. Defaults are at most three actions, stopping on
+settled, fully contained 80% coverage, with 35 simulated / 180 wall seconds per
+action and a one-hour command ceiling (`--max-wall-seconds` can reduce it).
+`--max-actions 1` or `2` reduces the action cap. Placement-quality violations are
+observations; physical execution, artifact, ownership and cleanup regressions stop
+execution. Failed/uncertain runs retain evidence and cannot be resumed or retried
+in place. Simulation reports give success within one/two/three actions, terminal
+coverage, failures and actions used. GPU smoke runs validate mechanics only.
 
-The bounded [near-half-fold pilot](docs/near-half-fold-pilot.md) tests the RGB learner
-on six training, two validation and four held-out near-half-fold fixtures, with
-80% measured early stopping and a 216-action ceiling. Run with
-`cloth-fling learning-family run`; use `learning-family report` for offline evidence.
-The [first family run](docs/near-half-fold-pilot-results.md) prepared all twelve
-fixtures but stopped before its first action due to a runner timer conflict. The
-bug is corrected and regression-tested; training and evaluation remain unrun.
+## Checkpoints and custom predictors
+
+`model.pt` is the existing RGB U-Net 32/64/128/256 CPU state dict, loaded with
+`torch.load(..., weights_only=True)`. The adjacent `model.json` records architecture,
+preprocessing, frozen v4 configuration hash, weights hash, fitting parameters and
+source hashes. Keep both files together; `cloth_fling.learning.load_model` verifies
+them. Existing compatible pilot checkpoints use the same loader.
+
+A custom Python `module:function` takes a NumPy **uint8 RGB tensor
+`[96,64,64,3]`** and returns finite immediate signed-gain maps `[96,64,64]`.
+T is rotation-major (12) then scale (8), with row/column last. No privileged inputs
+are passed to this function. Environment feasibility filtering happens after prediction.
+
+```python
+# my_policy.py (install it or put its directory on PYTHONPATH)
+import numpy as np
+
+def predict(rgb):
+    return np.zeros((96, 64, 64), dtype=np.float32)
+```
+
+```bash
+cloth-fling policy evaluate --mode sim --fixtures data/cloth-fling-v1 --predictor my_policy:predict --output runs/custom-validation
+```
+
+The same interface works with `--mode offline --dataset data/cloth-fling-v1`.
+Offline evaluation reconstructs RGB transforms from the saved RGB crop; it never
+uses fixture geometry or depth. The existing learner fits immediate outcomes at
+executed pixels; these whole-action examples are not ACT trajectory demonstrations.
+
+## Development and history
+
+```bash
+pip install '.[dev,train]'
+pytest -m 'not gpu'
+ruff check src tests scripts
+python scripts/export_dataset_v1.py --source runs/image-learning-pilot-v1 --output /tmp/cloth-fling-v1-export
+```
+
+CPU CI checks readers, policies, packaging and installation without Genesis.
+The [publication record](docs/publication-v1.md) pins source/data releases and
+verification. All historical commands remain available via `cloth-fling --help`.
+The [previous README](docs/historical-readme.md), [runtime](docs/runtime.md),
+[frozen motion](docs/frozen-laydown.md), [original learning pilot](docs/image-learning-pilot-results.md)
+and other campaign documentation are retained. Their terminal runs remain closed;
+local traces, videos, checkpoints and unrelated run directories are excluded from
+this release. Installing this repository does not download archived run directories.

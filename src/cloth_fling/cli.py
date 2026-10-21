@@ -120,6 +120,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Robotless cloth simulation and episode datasets")
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
+    from cloth_fling.policy import add_parser
+
+    add_parser(sub)
     doctor = sub.add_parser("doctor", help="Inspect dependencies/GPU; optionally build a scene")
     doctor.add_argument(
         "--probe", action="store_true", help="Build and render a flat Genesis scene"
@@ -269,6 +272,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "policy":
+            from cloth_fling.policy import run
+
+            print(json.dumps(run(args), indent=2, allow_nan=False))
+            return 0
         if args.command == "learning-family":
             from cloth_fling.learning_family import main as family_main
 

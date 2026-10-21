@@ -121,6 +121,9 @@ sim = [
     { name = "torch" },
     { name = "trimesh" },
 ]
+train = [
+    { name = "torch" },
+]
 video = [
     { name = "imageio" },
     { name = "imageio-ffmpeg" },
@@ -137,9 +140,10 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<10" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11,<1" },
     { name = "torch", marker = "extra == 'sim'", specifier = ">=2.7,<3", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "cloth-fling", extra = "sim" } },
+    { name = "torch", marker = "extra == 'train'", specifier = ">=2.7,<3" },
     { name = "trimesh", marker = "extra == 'sim'", specifier = ">=4.8.2,<5" },
 ]
-provides-extras = ["sim", "video", "dev"]
+provides-extras = ["train", "sim", "video", "dev"]
 
 [[package]]
 name = "coacd"

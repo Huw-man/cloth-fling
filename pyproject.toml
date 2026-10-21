@@ -6,10 +6,12 @@ build-backend = "hatchling.build"
 name = "cloth-fling"
 version = "0.2.0"
 description = "Robotless cloth unfolding experiments with explicit assisted grasps"
+license = "MIT"
 requires-python = ">=3.11,<3.13"
 dependencies = ["numpy>=1.26,<3", "pillow>=10,<13", "pyarrow>=18,<24"]
 
 [project.optional-dependencies]
+train = ["torch>=2.7,<3"]
 sim = ["genesis-world==1.4.4", "torch>=2.7,<3", "trimesh>=4.8.2,<5"]
 video = ["imageio>=2.36,<3", "imageio-ffmpeg>=0.6,<1"]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1"]

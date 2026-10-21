@@ -522,6 +522,7 @@ def episode(
     coverage_stop=0.95,
     require_containment=False,
     reserve_seconds=None,
+    max_actions=3,
 ):
     root = journal.root / "episodes" / name
     claim(
@@ -562,7 +563,7 @@ def episode(
             env,
             root / "dataset",
             episodes=1,
-            max_actions=3,
+            max_actions=max_actions,
             seed=seed,
             policy="image_learning_pilot",
             primitive="laydown",

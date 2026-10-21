@@ -160,12 +160,23 @@ def predictor(checkpoint, *, device="cuda"):
 
 
 def fit(datasets, output, *, previous=None, device="cuda", steps=2000, check_deadline=lambda: None):
+    return fit_arrays(
+        training_arrays(datasets), output, previous=previous, device=device,
+        steps=steps, check_deadline=check_deadline,
+    )
+
+
+def fit_arrays(arrays, output, *, previous=None, device="cpu", steps=2000,
+               check_deadline=lambda: None):
+    """Fit the same learner from an independently verified saved RGB projection."""
     import torch
 
     output = Path(output)
     if output.exists() or output.with_suffix(".json").exists():
         raise FileExistsError("training checkpoint is immutable")
-    images, pixels, rewards, sources = training_arrays(datasets)
+    if steps < 1:
+        raise ValueError("training steps must be positive")
+    images, pixels, rewards, sources = arrays
     if len(images) < 32:
         raise ValueError("insufficient eligible training data: need 32 settled samples")
     seed_training()
