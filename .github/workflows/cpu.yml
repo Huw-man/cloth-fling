@@ -1,5 +1,8 @@
 name: CPU and package install
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 jobs:
   cpu:
     runs-on: ubuntu-latest

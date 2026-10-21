@@ -425,3 +425,17 @@ this physical/uncertain campaign through the zero-action transfer path. Before
 future native runs, lock the executing Git worktree against removal and retain it
 until simulation, fitting, reporting and replay have all ended; merged source is
 still a live runtime dependency. Do not clean up another active worktree.
+
+## Dataset and policy workflow publication
+
+The user authorized MIT publication of existing code/history to
+`huw-man/cloth-fling` on GitHub, and CC BY 4.0 publication of only the completed
+original image-learning pilot as dataset v1 at `humannew/cloth-fling` on Hugging
+Face (the user corrected the dataset namespace). Model uploads remain deferred.
+The isolated `publish/workflow` branch adds explicit-path policy collection,
+saved-example training, offline evaluation and frozen-v4 simulation evaluation.
+See `docs/publication-v1.md`. Package readers remain independent of Torch/Genesis;
+the train extra needs Torch without Genesis. Existing campaigns remain terminal.
+The two newly authorized native smoke actions are complete: one collection and
+one checkpoint evaluation, 82.4596 seconds combined, verified cleanup, no retries.
+This publication grants no further native, training, cloud or collection budget.

@@ -17,7 +17,7 @@ patterns = {
     'generic-secret': rb'(?i)(?:api_key|access_token|client_secret|password)\s*[:=]\s*[\x22\x27][A-Za-z0-9/+_=.-]{20,}[\x22\x27]',
 }
 patterns = {k: re.compile(v) for k, v in patterns.items()}
-objects = subprocess.check_output(['git', 'rev-list', '--objects', 'HEAD']).decode().splitlines()
+objects = subprocess.check_output(['git', 'rev-list', '--objects', '--all']).decode().splitlines()
 objects = [line.split(' ', 1) for line in objects]
 findings, artifacts = [], []
 process = subprocess.Popen(['git', 'cat-file', '--batch'], stdin=subprocess.PIPE,
