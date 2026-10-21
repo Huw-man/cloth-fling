@@ -49,7 +49,9 @@ reset diversity.
 
 ## Execution, limits and evidence
 
-Use an isolated Herdr worktree and exclusive RTX 5080 lease. The campaign ceiling
+Use an isolated Herdr worktree and exclusive RTX 5080 lease. Lock the executing Git
+worktree against removal before native work, and keep it until all execution and
+evidence closeout ends, even after local integration. The campaign ceiling
 is six elapsed execution hours and 216 physical action attempts, including failures.
 Keep the final two hours unavailable to preparation/collection. Every action retains
 35 simulated/180 wall-second limits; reserve a complete action before claiming it.

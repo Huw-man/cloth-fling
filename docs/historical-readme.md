@@ -183,6 +183,7 @@ The bounded [near-half-fold pilot](docs/near-half-fold-pilot.md) tests the RGB l
 on six training, two validation and four held-out near-half-fold fixtures, with
 80% measured early stopping and a 216-action ceiling. Run with
 `cloth-fling learning-family run`; use `learning-family report` for offline evidence.
-The [first family run](docs/near-half-fold-pilot-results.md) prepared all twelve
-fixtures but stopped before its first action due to a runner timer conflict. The
-bug is corrected and regression-tested; training and evaluation remain unrun.
+The [family pilot results](docs/near-half-fold-pilot-results.md) preserve twelve
+fixtures, 62 attempts and a first checkpoint trained on 51 settled samples. The
+corrected run stopped when its executing worktree was removed during refresh;
+cleanup passed, but validation and held-out evaluation remain unrun.
