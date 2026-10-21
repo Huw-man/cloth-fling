@@ -286,6 +286,13 @@ def simulate(args, *, backend_factory=None):
             if result['episode'] not in saved:
                 results.append(result)
         metrics = simulation_metrics(results)
+        attempts = {}
+        for action in journal.actions:
+            name = action['episode']
+            attempts[name] = attempts.get(name, 0) + 1
+        metrics['actions_used_by_episode'] = attempts
+        metrics['actions_used'] = list(attempts.values())
+        metrics['total_actions_used'] = len(journal.actions)
         if not metrics['failures']:
             metrics['failures'].append({'error': str(exc)})
             metrics['failure_count'] = 1

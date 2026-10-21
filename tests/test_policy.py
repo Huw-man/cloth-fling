@@ -228,3 +228,34 @@ def test_busy_lease_prevents_checkpoint_gpu_allocation(tmp_path, monkeypatch):
         policy.simulate(args, backend_factory=lambda *a: pytest.fail('opened scene'))
     report = json.loads((tmp_path / 'out/report.json').read_text())
     assert report['status'] == 'failed' and report['action_intents'] == 0
+
+
+def test_failed_unfinalized_action_is_counted_and_scene_cleaned(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+
+    from cloth_fling import learning_pilot, reference_pilot, reference_run
+
+    root = tmp_path / 'data'
+    root.mkdir()
+    release_data.write_json(root / 'fixtures-manifest.json', {})
+    release_data.write_json(root / 'release-manifest.json', {})
+    monkeypatch.setattr(policy, 'fixture_bundles', lambda *a: [({'id': 'f'}, {})])
+    monkeypatch.setattr(reference_run, 'reference_lease', lambda _: nullcontext())
+    monkeypatch.setattr(reference_pilot, 'certify_release', lambda _: {'passed': True})
+    closed = []
+
+    def failure(env, journal, *a, **kw):
+        journal.claim_action('failed-episode', 0)
+        raise RuntimeError('physical stop')
+
+    monkeypatch.setattr(learning_pilot, 'episode', failure)
+    args = build_parser().parse_args([
+        'policy', 'collect', '--fixtures', str(root), '--output', str(tmp_path / 'out'),
+    ])
+    with pytest.raises(RuntimeError, match='physical stop'):
+        policy.simulate(args, backend_factory=lambda _: SimpleNamespace(close=lambda: closed.append(1)))
+    report = json.loads((tmp_path / 'out/report.json').read_text())
+    assert report['total_actions_used'] == report['action_intents'] == 1
+    assert report['actions_used_by_episode'] == {'failed-episode': 1}
+    assert report['failure_count'] == 1 and closed == [1]
+    assert json.loads((tmp_path / 'out/scene-cleanup.json').read_text())['passed']
