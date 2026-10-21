@@ -1,3 +1,4 @@
+
 """Offline position-friction, progressive-deposition and campaign guard checks."""
 
 import json
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from schedule_assertions import assert_schedule_equal
 from test_reference_tune import NativeFake
 
 from cloth_fling.contracts import GraspAction, ReferenceSceneConfig, scene_config_from_dict
@@ -575,10 +577,12 @@ def test_campaign_configuration_matches_compiler_and_case_order():
     root = Path(__file__).parents[1]
     doc = json.loads((root / "configs/reference-diagonal-campaign-v3.json").read_text())
     assert doc["contact_cases"] == contact_cases()
-    assert doc["candidates"] == [
-        {"index": i, "trajectory": asdict(c), "schedule": diagonal_schedule(c)[1]}
-        for i, c in enumerate(diagonal_grid())
-    ]
+    assert len(doc["candidates"]) == len(diagonal_grid())
+    for i, candidate in enumerate(diagonal_grid()):
+        frozen = doc["candidates"][i]
+        assert frozen["index"] == i
+        assert frozen["trajectory"] == asdict(candidate)
+        assert_schedule_equal(diagonal_schedule(candidate)[1], frozen["schedule"])
 
 
 def test_new_landings_do_not_dilute_a_previously_deposited_cohort():

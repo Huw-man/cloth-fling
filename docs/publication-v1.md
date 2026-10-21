@@ -55,6 +55,9 @@ The 48 payload files total 10,176,476 bytes; the small release manifest is addit
 GitHub CPU CI covers Python 3.11/3.12, base/train wheel installation and bundled
 profile loading. Final anonymous code-install/quickstart and hosted CI results are
 recorded with the `workflow-v1` GitHub release.
+Frozen schedule tests compare recomputed polynomial coefficients with 1e-12
+absolute tolerance across NumPy/BLAS builds. Structure, timing, configuration
+bytes and controller hashes retain exact checks; no runtime or physics was changed.
 
 ## Two native smoke actions
 

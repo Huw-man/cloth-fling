@@ -1,9 +1,11 @@
+
 """Offline safeguards; fake dynamics cannot qualify towel behavior."""
 
 import json
 
 import numpy as np
 import pytest
+from schedule_assertions import assert_schedule_equal
 from test_reference import FakeReference
 
 from cloth_fling.contracts import GraspAction
@@ -400,7 +402,7 @@ def test_versioned_configuration_matches_executed_grid():
         (Path(__file__).parents[1] / "configs/reference-leading-v2-frozen.json").read_text()
     )
     _, schedule = placement_schedule(LeadingTrajectory(**frozen["trajectory"]))
-    assert schedule == frozen["schedule"]
+    assert_schedule_equal(schedule, frozen["schedule"])
 
 
 def test_terminal_tuning_cli_is_offline(tmp_path):

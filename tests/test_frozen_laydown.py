@@ -1,3 +1,4 @@
+
 """Post-grasp lifecycle and frozen-control parity; fake dynamics do not qualify behavior."""
 
 import json
@@ -8,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from schedule_assertions import assert_schedule_equal
 from test_reference_diagonal import DemonstrationFake
 
 from cloth_fling.contracts import GraspAction
@@ -163,9 +165,7 @@ def test_frozen_artifacts_match_the_selected_trajectory_and_packaged_copy():
     assert spec["trajectory"]["diagonal_seconds"] == 6
     actual_schedule = diagonal_schedule(DiagonalTrajectory(**spec["trajectory"]))[1]
     frozen_schedule = dict(spec["schedule"])
-    for key in ("peak_speed_m_s", "peak_acceleration_m_s2"):
-        assert frozen_schedule.pop(key) == pytest.approx(actual_schedule.pop(key), abs=1e-12)
-    assert frozen_schedule == actual_schedule
+    assert_schedule_equal(actual_schedule, frozen_schedule)
     assert spec["scene"] == json.loads(json.dumps(diagonal_scene().to_dict()))
     assert not spec["reference_evidence"]["qualification_complete"]
     assert spec["reference_evidence"]["coverage_after"] == pytest.approx(0.9797666666666668)
